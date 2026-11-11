@@ -10,6 +10,22 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: intake_test
+          POSTGRES_PASSWORD: intake_test
+          POSTGRES_DB: aimplify_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U intake_test -d aimplify_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_POSTGRESQL_URL: postgresql+psycopg://intake_test:intake_test@localhost:5432/aimplify_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -22,11 +38,19 @@ jobs:
       - name: Install uv
         run: pip install uv
 
-      - name: Install backend dependencies
-        run: uv sync --project backend --all-extras
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Run backend tests
-        run: uv run --project backend pytest -q
+      - name: Install backend dependencies
+        run: uv sync --locked --project backend --all-extras
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Run required verification
+        run: pwsh -NoProfile -File scripts/verify.ps1 -Required
 
   frontend:
     runs-on: ubuntu-latest
@@ -92,7 +116,7 @@ jobs:
         run: pip install uv
 
       - name: Install backend dependencies
-        run: uv sync --project backend --all-extras
+        run: uv sync --locked --project backend --all-extras
 
       - name: Run golden evaluation gate
         run: uv run --project backend python backend/scripts/run_golden_evaluation.py

@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSoc
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pptx.exc import PackageNotFoundError as PptxPackageNotFoundError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from PyPDF2.errors import PdfReadError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -29,14 +29,19 @@ from aimplify_intake.ingestion.buffers import read_request_stream_to_memory
 from aimplify_intake.ingestion.documents import extract_docx, extract_pdf, extract_pptx
 from aimplify_intake.persistence.models import FieldValue, IdeaSubmission
 from aimplify_intake.persistence.repositories import (
+    SubmissionPersistenceError,
     create_database,
     create_submission,
+    finalize_submission,
     get_authorized_submission,
     persist_ai_values,
     read_field_state,
 )
 from aimplify_intake.schema.registry import load_canonical_schema
-from aimplify_intake.services.extraction import CandidateExtractor, extract_safe_candidates
+from aimplify_intake.services.extraction import (
+    CandidateExtractor,
+    extract_detailed_candidates,
+)
 
 IdentityVerifier = Callable[[str], dict[str, Any]]
 SOURCE_TYPES = {
@@ -68,6 +73,10 @@ MEDIA_TYPES = {
 class MessageBody(BaseModel):
     request_id: str | None = None
     text: str = Field(min_length=1, max_length=20_000)
+
+
+class SubmitBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 def _generic_error(code: str, message: str, status_code: int, request_id: str | None = None) -> JSONResponse:
@@ -104,7 +113,7 @@ def create_app(
     app.state.identity_verifier = identity_verifier
     app.state.candidate_extractor = candidate_extractor
     app.state.intake_graph = create_intake_graph(
-        lambda text: extract_safe_candidates(text, app.state.candidate_extractor)
+        lambda text: extract_detailed_candidates(text, app.state.candidate_extractor)
     )
     app.state.transcription_provider = transcription_provider
     app.state.transcription_no_retention_approved = transcription_no_retention_approved
@@ -145,9 +154,7 @@ def create_app(
         vercel_prod_url = os.getenv("VERCEL_PROJECT_PRODUCTION_URL")
         if vercel_prod_url and origin in (f"https://{vercel_prod_url}", f"http://{vercel_prod_url}"):
             return True
-        if origin.endswith(".vercel.app"):
-            return True
-        return False
+        return bool(origin.endswith(".vercel.app"))
 
     def require_allowed_origin(origin: str | None) -> None:
         if not is_origin_allowed(origin):
@@ -162,10 +169,12 @@ def create_app(
 
     app.include_router(create_human_fields_router(subject_for, require_allowed_origin))
 
-    def process_text(submission_id: str, text: str, request_id: str) -> dict[str, Any]:
+    def process_text(
+        submission_id: str, text: str, request_id: str, subject_ref: str
+    ) -> dict[str, Any]:
         with session_factory() as session:
             submission = session.get(IdeaSubmission, submission_id)
-            if submission is None:
+            if submission is None or submission.subject_ref != subject_ref:
                 raise HTTPException(status_code=404, detail="Session not found.")
             current_values = {
                 value.field_key: value.value
@@ -182,9 +191,11 @@ def create_app(
                 }
             )
             updates = turn["field_updates"]
-            persist_ai_values(session, submission, updates)
+            persist_ai_values(session, submission, updates, subject_ref=subject_ref)
+            session.commit()
             state = read_field_state(session, submission)
             state["clarification"] = turn["clarification"]
+            state["safety_notice"] = turn["safety_notice"]
             state["request_id"] = request_id
             state["field_updates"] = updates
             return state
@@ -204,10 +215,16 @@ def create_app(
             no_retention_approved=app.state.transcription_no_retention_approved,
         )
 
-    def process_source(submission_id: str, media_type: str, source: BytesIO, request_id: str) -> dict[str, Any]:
+    def process_source(
+        submission_id: str,
+        media_type: str,
+        source: BytesIO,
+        request_id: str,
+        subject_ref: str,
+    ) -> dict[str, Any]:
         try:
             text = parse_source(media_type, source)
-            return process_text(submission_id, text, request_id)
+            return process_text(submission_id, text, request_id, subject_ref)
         finally:
             source.close()
 
@@ -226,6 +243,20 @@ def create_app(
         _request: Request, _error: RequestValidationError
     ) -> JSONResponse:
         return _generic_error("REQUEST_INVALID", "The request could not be processed.", 422)
+
+    @app.exception_handler(SubmissionPersistenceError)
+    async def submission_error_handler(
+        _request: Request, error: SubmissionPersistenceError
+    ) -> JSONResponse:
+        details: dict[str, Any] = {
+            "code": error.code,
+            "message": str(error),
+            "request_id": uuid4().hex,
+        }
+        if hasattr(error, "missing_fields") and hasattr(error, "invalid_fields"):
+            details["missing_fields"] = error.missing_fields
+            details["invalid_fields"] = error.invalid_fields
+        return JSONResponse(status_code=error.status_code, content={"error": details})
 
     @app.get("/health/live")
     async def health_live() -> dict[str, str]:
@@ -279,13 +310,22 @@ def create_app(
                 raise HTTPException(status_code=404, detail="Session not found.")
             return read_field_state(session, submission)
 
+    @app.post("/api/v1/sessions/{session_id}/submit")
+    async def submit_session(
+        session_id: str, _body: SubmitBody, request: Request
+    ) -> dict[str, str]:
+        require_allowed_origin(request.headers.get("origin"))
+        subject = subject_for(request.cookies.get("oidc_session"))
+        with session_factory() as session:
+            return finalize_submission(session, session_id, subject)
+
     @app.post("/api/v1/sessions/{session_id}/messages")
     async def send_message(session_id: str, body: MessageBody, request: Request) -> Any:
         require_allowed_origin(request.headers.get("origin"))
         subject = subject_for(request.cookies.get("oidc_session"))
         authorized_submission(session_id, subject)
         request_id = body.request_id or uuid4().hex
-        return process_text(session_id, body.text, request_id)
+        return process_text(session_id, body.text, request_id, subject)
 
     @app.post("/api/v1/sessions/{session_id}/sources/{media_type}")
     async def upload_source(session_id: str, media_type: str, request: Request) -> Any:
@@ -303,7 +343,7 @@ def create_app(
             return _generic_error("SOURCE_TOO_LARGE", "This source exceeds the allowed size.", 413)
         request_id = request.headers.get("x-request-id") or uuid4().hex
         try:
-            result = process_source(session_id, media_type, source, request_id)
+            result = process_source(session_id, media_type, source, request_id, subject)
         except RuntimeError:
             return _generic_error("SOURCE_PROCESSING_UNAVAILABLE", "This source could not be processed.", 503, request_id)
         except (
@@ -384,7 +424,7 @@ def create_app(
                         text = payload.get("text")
                         if not isinstance(text, str) or not text.strip() or len(text) > 20_000:
                             raise ValueError("Invalid message.")
-                        result = process_text(session_id, text, request_id)
+                        result = process_text(session_id, text, request_id, subject)
                         events = _turn_events(result)
                         _cache_request(processed_requests, request_id, fingerprint, events)
                         await _send_events(websocket, events)
@@ -415,7 +455,9 @@ def create_app(
                         selected_type = active_source["media_type"]
                         active_source = None
                         try:
-                            result = process_source(session_id, selected_type, source, request_id)
+                            result = process_source(
+                                session_id, selected_type, source, request_id, subject
+                            )
                         except RuntimeError:
                             await websocket.send_json({"type": "server.error", "request_id": request_id, "payload": {"code": "SOURCE_PROCESSING_UNAVAILABLE", "message": "This source could not be processed."}})
                             continue
@@ -437,6 +479,14 @@ def create_app(
                         await _send_events(websocket, events)
                     else:
                         raise ValueError("Unsupported event.")
+                except SubmissionPersistenceError as error:
+                    payload: dict[str, Any] = {"code": error.code, "message": str(error)}
+                    if hasattr(error, "missing_fields") and hasattr(error, "invalid_fields"):
+                        payload["missing_fields"] = error.missing_fields
+                        payload["invalid_fields"] = error.invalid_fields
+                    await websocket.send_json(
+                        {"type": "server.error", "request_id": request_id, "payload": payload}
+                    )
                 except (json.JSONDecodeError, ValueError, TypeError):
                     await websocket.send_json({"type": "server.error", "request_id": uuid4().hex, "payload": {"code": "REQUEST_INVALID", "message": "The request could not be processed."}})
         except WebSocketDisconnect:
@@ -472,7 +522,10 @@ def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "type": "server.submission.status",
             "request_id": request_id,
-            "payload": {"status": result["status"]},
+            "payload": {
+                "status": result["status"],
+                "safety_notice": result["safety_notice"],
+            },
         }
     )
     return events

@@ -1,5 +1,6 @@
 from aimplify_intake.graph.intake_graph import create_intake_graph
 from aimplify_intake.schema.registry import load_canonical_schema
+from aimplify_intake.services.extraction import DetailedExtractionResult
 
 FIELDS = [
     {"key": "first", "mandatory": True, "clarification_prompt": "What is the first detail?"},
@@ -62,3 +63,33 @@ def test_graph_retry_is_deterministic_for_same_saved_state() -> None:
 
     assert retry["clarification"] == first_attempt["clarification"]
     assert isinstance(retry["clarification"], dict)
+
+
+def test_graph_propagates_safety_notice_without_changing_question_pacing() -> None:
+    notice = {
+        "code": "NO_FACTS_REJECTED",
+        "status": "denied",
+        "reason": "NoFacts",
+        "reasons": ["number"],
+    }
+    graph = create_intake_graph(
+        lambda _text: DetailedExtractionResult(
+            field_updates=[
+                {"field_key": "first", "value": "A safe response", "origin": "ai_extracted"}
+            ],
+            safety_notice=notice,
+        )
+    )
+
+    result = graph.invoke(
+        {"text": "Mixed answer", "canonical_fields": FIELDS, "current_values": {}}
+    )
+
+    assert result["field_updates"] == [
+        {"field_key": "first", "value": "A safe response", "origin": "ai_extracted"}
+    ]
+    assert result["safety_notice"] == notice
+    assert result["clarification"] == {
+        "field_key": "second",
+        "question": "What is the second detail?",
+    }
