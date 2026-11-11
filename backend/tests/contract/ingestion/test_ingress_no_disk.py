@@ -39,8 +39,9 @@ def _pptx() -> bytes:
     return stream.getvalue()
 
 
+@pytest.mark.parametrize("outcome", ["safe", "denied", "failed"])
 def test_http_ingress_passes_all_supported_sources_to_parsers_without_disk_writes(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, outcome: str,
 ) -> None:
     payloads = [
         ("pdf", "application/pdf", _pdf()),
@@ -121,10 +122,15 @@ def test_http_ingress_passes_all_supported_sources_to_parsers_without_disk_write
     for tempfile_api in ("TemporaryFile", "NamedTemporaryFile", "SpooledTemporaryFile"):
         monkeypatch.setattr(tempfile, tempfile_api, trap_tempfile)
 
+    def candidates(_text: str) -> dict[str, str]:
+        if outcome == "failed":
+            raise RuntimeError("Private processing failure")
+        return {"problem_statement": "Private claim 42%" if outcome == "denied" else "Policy discovery can be simplified."}
+
     app = intake_app.create_app(
         database_url="sqlite+pysqlite:///:memory:",
         identity_verifier=lambda _cookie: {"subject": "employee-1"},
-        candidate_extractor=lambda _text: {"problem_statement": "Policy discovery can be simplified."},
+        candidate_extractor=candidates,
         transcription_provider=lambda _stream, _media_type: "A safe spoken idea.",
         transcription_no_retention_approved=True,
         max_upload_bytes=20 * 1024 * 1024,
@@ -139,7 +145,10 @@ def test_http_ingress_passes_all_supported_sources_to_parsers_without_disk_write
                 content=payload,
                 headers={"content-type": content_type},
             )
-            assert response.status_code == 200
+            assert response.status_code == (503 if outcome == "failed" else 200)
+            assert "Private" not in response.text
+            if outcome == "denied":
+                assert response.json()["safety_notice"]["reason"] == "NoFacts"
 
     assert len(stream_requests) == len(payloads)
     assert len(memory_buffers) == len(payloads)

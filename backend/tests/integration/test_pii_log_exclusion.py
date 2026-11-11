@@ -3,6 +3,7 @@ from io import BytesIO
 
 from fastapi.testclient import TestClient
 from PyPDF2 import PdfWriter
+import pytest
 
 from aimplify_intake.api.app import create_app
 
@@ -15,8 +16,9 @@ def _blank_pdf() -> bytes:
     return stream.getvalue()
 
 
+@pytest.mark.parametrize("denied", [False, True])
 def test_http_upload_and_websocket_canaries_do_not_appear_in_server_logs(
-    caplog: object,
+    caplog: pytest.LogCaptureFixture, denied: bool,
 ) -> None:
     canaries = (
         "person@example.com",
@@ -28,7 +30,9 @@ def test_http_upload_and_websocket_canaries_do_not_appear_in_server_logs(
     app = create_app(
         database_url="sqlite+pysqlite:///:memory:",
         identity_verifier=lambda _cookie: {"subject": "employee-1"},
-        candidate_extractor=lambda _text: {"problem_statement": canaries[-1]},
+        candidate_extractor=lambda _text: {
+            "problem_statement": canaries[-1] + (" 42%" if denied else "")
+        },
     )
     caplog.set_level(logging.DEBUG)
 
@@ -40,7 +44,9 @@ def test_http_upload_and_websocket_canaries_do_not_appear_in_server_logs(
             json={"request_id": "pii-log-http", "text": f"{canaries[0]} {canaries[3]}"},
         )
         assert message.status_code == 200
-        assert canaries[-1] in message.text
+        assert (canaries[-1] in message.text) is not denied
+        if denied:
+            assert message.json()["safety_notice"]["reason"] == "NoFacts"
 
         upload = client.post(
             f"/api/v1/sessions/{session_id}/sources/pdf",
@@ -51,6 +57,12 @@ def test_http_upload_and_websocket_canaries_do_not_appear_in_server_logs(
             },
         )
         assert upload.status_code == 200
+        if denied:
+            assert canaries[-1] not in upload.text
+            assert upload.json()["safety_notice"]["status"] == "denied"
+        incomplete = client.post(f"/api/v1/sessions/{session_id}/submit", json={})
+        assert incomplete.status_code == 422
+        assert all(canary not in incomplete.text for canary in canaries)
 
         with client.websocket_connect(
             f"/api/v1/sessions/{session_id}/stream",
@@ -64,8 +76,15 @@ def test_http_upload_and_websocket_canaries_do_not_appear_in_server_logs(
                     "payload": {"text": f"{canaries[0]} {canaries[3]}"},
                 }
             )
-            for _ in range(3):
-                websocket.receive_json()
+            for _ in range(5):
+                event = websocket.receive_json()
+                if denied:
+                    assert canaries[-1] not in str(event)
+                if event["type"] == "server.submission.status":
+                    break
+            assert event["type"] == "server.submission.status"
+            if denied:
+                assert event["payload"]["safety_notice"]["reason"] == "NoFacts"
 
     captured_logs = "\n".join(
         f"{record.name} {record.__dict__!r}" for record in caplog.records

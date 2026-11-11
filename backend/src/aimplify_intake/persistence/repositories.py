@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -27,6 +29,62 @@ from aimplify_intake.schema.validation import (
 )
 
 NON_AI_WRITABLE = {"declaration_accepted", "submitter_signature", "date_of_submission", "reviewer_notes"}
+
+
+def _ordered_canonical_keys(keys: Iterable[str]) -> list[str]:
+    requested = set(keys)
+    schema = publish_schema(load_canonical_schema())
+    return [field["key"] for field in schema.fields if field["key"] in requested]
+
+
+def _format_timestamp(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
+class SubmissionPersistenceError(Exception):
+    code: str
+    status_code: int
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class SubmissionIncompleteError(SubmissionPersistenceError):
+    code = "SUBMISSION_INCOMPLETE"
+    status_code = 422
+
+    def __init__(self, missing_fields: Iterable[str], invalid_fields: Iterable[str]) -> None:
+        self.missing_fields = _ordered_canonical_keys(missing_fields)
+        self.invalid_fields = _ordered_canonical_keys(invalid_fields)
+        super().__init__(
+            "Complete the required information and save your declaration before submitting."
+        )
+
+
+class SubmissionClosedError(SubmissionPersistenceError):
+    code = "SUBMISSION_CLOSED"
+    status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__("This idea has already been submitted.")
+
+
+class SubmissionNotFoundError(SubmissionPersistenceError):
+    code = "SESSION_NOT_FOUND"
+    status_code = 404
+
+    def __init__(self) -> None:
+        super().__init__("Session not found.")
+
+
+class SubmissionUnavailableError(SubmissionPersistenceError):
+    code = "SERVICE_UNAVAILABLE"
+    status_code = 503
+
+    def __init__(self) -> None:
+        super().__init__("The intake service is temporarily unavailable.")
 
 
 def create_database(database_url: str) -> tuple[Engine, sessionmaker[Session]]:
@@ -53,6 +111,7 @@ def ensure_canonical_schema(session: Session) -> None:
             mandatory_count=sum(bool(field["mandatory"]) for field in schema.fields),
         )
     )
+    session.flush()
     session.add_all(
         IntakeSection(
             schema_version=schema.schema_version,
@@ -100,12 +159,141 @@ def get_authorized_submission(session: Session, submission_id: str, subject_ref:
     return submission
 
 
+def get_submission_readiness(session: Session, submission: IdeaSubmission) -> dict[str, object]:
+    schema = publish_schema(load_canonical_schema())
+    stored_values = {
+        item.field_key: item
+        for item in session.scalars(
+            select(FieldValue)
+            .where(FieldValue.submission_id == submission.submission_id)
+            .execution_options(populate_existing=True)
+        )
+    }
+    declaration_keys = {"declaration_accepted", "date_of_submission", "submitter_signature"}
+    required_fields = [
+        field for field in schema.fields if field["mandatory"] or field["key"] in declaration_keys
+    ]
+    missing_fields: list[str] = []
+    invalid_fields: list[str] = []
+
+    for definition in required_fields:
+        field_key = definition["key"]
+        stored = stored_values.get(field_key)
+        if stored is None:
+            missing_fields.append(field_key)
+            continue
+
+        try:
+            validate_field_origin(definition, stored.origin)
+            candidate: object = stored.value
+            if definition["value_type"] == "boolean":
+                if stored.value not in {"true", "false"}:
+                    raise ValueError("Stored boolean is invalid.")
+                candidate = stored.value == "true"
+            validate_field_value(definition, candidate)
+            if field_key in declaration_keys and stored.origin != "human_entered":
+                raise ValueError("Declaration origin is invalid.")
+            if field_key == "declaration_accepted" and stored.value != "true":
+                raise ValueError("Declaration acceptance is required.")
+        except ValueError:
+            invalid_fields.append(field_key)
+
+    if submission.status == "submitted":
+        return {"ready": True, "missing_fields": [], "invalid_fields": []}
+    return {
+        "ready": not missing_fields and not invalid_fields,
+        "missing_fields": missing_fields,
+        "invalid_fields": invalid_fields,
+    }
+
+
+def _lock_submission_for_write(
+    session: Session, submission_id: str, subject_ref: str
+) -> IdeaSubmission:
+    if session.get_bind().dialect.name == "sqlite":
+        connection = session.connection()
+        driver_connection = connection.connection.driver_connection
+        if not driver_connection.in_transaction:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+    submission = session.scalar(
+        select(IdeaSubmission)
+        .where(
+            IdeaSubmission.submission_id == submission_id,
+            IdeaSubmission.subject_ref == subject_ref,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if submission is None:
+        raise SubmissionNotFoundError()
+    if submission.status != "in_progress":
+        raise SubmissionClosedError()
+    return submission
+
+
+def finalize_submission(session: Session, submission_id: str, subject_ref: str) -> dict[str, str]:
+    try:
+        if session.get_bind().dialect.name == "sqlite":
+            connection = session.connection()
+            driver_connection = connection.connection.driver_connection
+            if not driver_connection.in_transaction:
+                connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+        submission = session.scalar(
+            select(IdeaSubmission)
+            .where(
+                IdeaSubmission.submission_id == submission_id,
+                IdeaSubmission.subject_ref == subject_ref,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if submission is None:
+            raise SubmissionNotFoundError()
+        if submission.status == "submitted" and submission.submitted_at is not None:
+            receipt = {
+                "session_id": submission.submission_id,
+                "status": "submitted",
+                "submitted_at": _format_timestamp(submission.submitted_at),
+            }
+            session.commit()
+            return receipt
+        if submission.status != "in_progress":
+            raise SubmissionClosedError()
+
+        readiness = get_submission_readiness(session, submission)
+        if not readiness["ready"]:
+            raise SubmissionIncompleteError(
+                readiness["missing_fields"], readiness["invalid_fields"]
+            )
+
+        submitted_at = datetime.now(UTC)
+        submission.status = "submitted"
+        submission.submitted_at = submitted_at
+        submission.updated_at = submitted_at
+        session.commit()
+        return {
+            "session_id": submission.submission_id,
+            "status": "submitted",
+            "submitted_at": submitted_at.isoformat(),
+        }
+    except SQLAlchemyError as error:
+        session.rollback()
+        raise SubmissionUnavailableError() from error
+    except Exception:
+        session.rollback()
+        raise
+
+
 def read_field_state(session: Session, submission: IdeaSubmission) -> dict[str, object]:
     schema = publish_schema(load_canonical_schema())
     values = {
         item.field_key: item
         for item in session.scalars(
-            select(FieldValue).where(FieldValue.submission_id == submission.submission_id)
+            select(FieldValue)
+            .where(FieldValue.submission_id == submission.submission_id)
+            .execution_options(populate_existing=True)
         )
     }
     sections = []
@@ -132,10 +320,17 @@ def read_field_state(session: Session, submission: IdeaSubmission) -> dict[str, 
         "schema_version": submission.schema_version,
         "sections": sections,
         "status": submission.status,
+        "submitted_at": _format_timestamp(submission.submitted_at) if submission.submitted_at else None,
+        "readiness": get_submission_readiness(session, submission),
     }
 
 
-def persist_ai_values(session: Session, submission: IdeaSubmission, updates: list[dict[str, str]]) -> None:
+def persist_ai_values(
+    session: Session,
+    submission: IdeaSubmission,
+    updates: list[dict[str, str]],
+    subject_ref: str | None = None,
+) -> None:
     schema = publish_schema(load_canonical_schema())
     definitions = {field["key"]: field for field in schema.fields}
     validated = []
@@ -149,6 +344,11 @@ def persist_ai_values(session: Session, submission: IdeaSubmission, updates: lis
             raise ValueError("AI candidate has not passed NoFacts validation.")
         validated.append((field_key, validate_field_value(definition, update["value"])))
     try:
+        submission = _lock_submission_for_write(
+            session,
+            submission.submission_id,
+            subject_ref if subject_ref is not None else submission.subject_ref,
+        )
         for field_key, value in validated:
             current = session.scalar(
                 select(FieldValue).where(
@@ -169,14 +369,20 @@ def persist_ai_values(session: Session, submission: IdeaSubmission, updates: lis
                 current.value = value
                 current.origin = "ai_extracted"
                 current.updated_at = datetime.now(UTC)
-        session.commit()
+        session.flush()
+    except SQLAlchemyError as error:
+        session.rollback()
+        raise SubmissionUnavailableError() from error
     except Exception:
         session.rollback()
         raise
 
 
 def persist_human_values(
-    session: Session, submission: IdeaSubmission, updates: dict[str, object]
+    session: Session,
+    submission: IdeaSubmission,
+    updates: dict[str, object],
+    subject_ref: str | None = None,
 ) -> dict[str, str]:
     schema = publish_schema(load_canonical_schema())
     definitions = {field["key"]: field for field in schema.fields}
@@ -188,6 +394,11 @@ def persist_human_values(
         validate_field_origin(definition, "human_entered")
         validated[field_key] = validate_field_value(definition, candidate)
     try:
+        submission = _lock_submission_for_write(
+            session,
+            submission.submission_id,
+            subject_ref if subject_ref is not None else submission.subject_ref,
+        )
         for field_key, value in validated.items():
             current = session.scalar(
                 select(FieldValue).where(
@@ -208,7 +419,10 @@ def persist_human_values(
                 current.value = value
                 current.origin = "human_entered"
                 current.updated_at = datetime.now(UTC)
-        session.commit()
+        session.flush()
+    except SQLAlchemyError as error:
+        session.rollback()
+        raise SubmissionUnavailableError() from error
     except Exception:
         session.rollback()
         raise
