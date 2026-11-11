@@ -1,0 +1,30 @@
+# .copilotignore - Block sensitive files from Copilot AI indexing and prompt context
+# Enforces Playbook Chapter 02 (Page 12) Secret Hygiene
+
+# Environment & Secret files
+.env
+.env.*
+!.env.example
+*.local
+
+# Certificates & Private Keys
+*.pem
+*.key
+*.crt
+*.cert
+*.pfx
+*.p12
+
+# Cloud Credentials & Tokens
+*credentials*.json
+*token*.json
+.aws/
+.gcp/
+.azure/
+oidc-trust.json
+
+# Build & Dependency Artifacts
+node_modules/
+.venv/
+dist/
+build/
