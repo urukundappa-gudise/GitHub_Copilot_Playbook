@@ -135,6 +135,22 @@ def validate_case_coverage(cases: list[dict[str, Any]], manifest: dict[str, Any]
             raise ValueError(f"Golden case {case['id']} must define a claim and expected outcome.")
         if len(case.get("no_facts_categories", [])) != 1:
             raise ValueError(f"Golden case {case['id']} must target one NoFacts category.")
+        expected_notice = case.get("expected_safety_notice")
+        if case.get("expected_intake_status") != "in_progress" or not isinstance(expected_notice, dict):
+            raise ValueError(f"Golden case {case['id']} must define its intake status and safety notice.")
+        if (
+            expected_notice.get("code") != "NO_FACTS_REJECTED"
+            or expected_notice.get("status") != "denied"
+            or expected_notice.get("reason") != "NoFacts"
+            or not isinstance(expected_notice.get("reasons"), list)
+            or not expected_notice["reasons"]
+            or not set(case["no_facts_categories"]).issubset(expected_notice["reasons"])
+            or expected_notice["reasons"] != [
+                category for category in ("number", "percentage", "cost", "date", "word_quantity")
+                if category in expected_notice["reasons"]
+            ]
+        ):
+            raise ValueError(f"Golden case {case['id']} has an invalid expected safety notice.")
 
 
 def evaluate_case(case: dict[str, Any], expected: dict[str, Any]) -> None:
@@ -185,6 +201,10 @@ def evaluate_case(case: dict[str, Any], expected: dict[str, Any]) -> None:
         if response.status_code != 200:
             raise AssertionError(f"Golden case {case['id']} returned HTTP {response.status_code}.")
         result = response.json()
+        if result["status"] != expected.get("intake_status", "in_progress"):
+            raise AssertionError(f"Golden case {case['id']} returned an unexpected intake status.")
+        if result.get("safety_notice") != expected.get("safety_notice"):
+            raise AssertionError(f"Golden case {case['id']} returned an unexpected safety notice.")
         accepted_fields = {update["field_key"] for update in result["field_updates"]}
         rejected_fields = {"idea_title", "problem_statement"} - accepted_fields
         if accepted_fields != set(expected["accepted_fields"]):
@@ -223,6 +243,9 @@ def run_golden_evaluation(
     validate_manifest(manifest)
     validate_case_coverage(cases, manifest)
     for case in cases:
-        evaluate_case(case, manifest["expected_outcomes"][case["expected_outcome"]])
+        expected = dict(manifest["expected_outcomes"][case["expected_outcome"]])
+        expected["intake_status"] = case["expected_intake_status"]
+        expected["safety_notice"] = case["expected_safety_notice"]
+        evaluate_case(case, expected)
     return manifest, cases
 

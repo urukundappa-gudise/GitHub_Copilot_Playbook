@@ -1,7 +1,8 @@
 # Validation Guide: Submission and Safety Popups
 
-This guide is for the implementation phase. The planned endpoint and tests must exist
-before feature acceptance is claimed. Planning alone does not make the feature runnable.
+The submission and safety-notice endpoints are implemented. The checks below are still
+required evidence for full feature acceptance; a green local subset does not substitute for
+PostgreSQL, browser, assistive-technology, or merge-gate verification.
 See [contracts](contracts/intake-outcomes.md) and [state model](data-model.md).
 
 ## Prerequisites
@@ -9,6 +10,12 @@ See [contracts](contracts/intake-outcomes.md) and [state model](data-model.md).
 - Python >=3.11, uv, Node.js/npm, existing backend and frontend dependencies.
 - A disposable PostgreSQL database for migration and cross-connection concurrency checks;
   SQLite remains the default isolated test path but cannot prove PostgreSQL locking.
+- Persistence tests use a per-test SQLite file by default. Optional PostgreSQL tests read
+  `TEST_POSTGRESQL_URL` and require a database name containing a standalone `test`, `tests`,
+  or `disposable` marker; each test creates and drops its own isolated schema. Without that
+  URL, PostgreSQL cases skip in developer mode. Required verification sets `VERIFY_REQUIRED=1`
+  and fails if the URL is missing or does not identify a test database. Use only a database
+  created for these tests; never point the variable at shared, staging, or production data.
 - Existing application environment configured locally. Do not print or commit credentials.
 - For interactive audio, the existing approved no-retention transcription provider must
   be configured; automated tests can use existing injected provider fixtures.
@@ -17,7 +24,7 @@ Run commands from the repository root in PowerShell unless a step changes locati
 Restore dependencies only if absent or required by changed manifests:
 
 ```powershell
-uv sync --project backend --extra dev
+uv sync --locked --project backend --extra dev
 npm ci --prefix frontend
 ```
 
@@ -44,14 +51,13 @@ Extend the existing tests rather than introducing a new runner. The following di
 and files already exist; add submission/outcome cases alongside them:
 
 ```powershell
-uv run --project backend pytest -q backend/tests/unit/safety backend/tests/integration/persistence backend/tests/integration/graph backend/tests/integration/test_no_facts_boundaries.py backend/tests/contract/api
-npm run test --prefix frontend -- src/App.test.tsx src/tests/intake-flow.test.tsx src/tests/human_declarations.test.tsx src/tests/clarification.test.tsx
+uv run --locked --project backend pytest -q backend/tests/contract/api/test_submission_outcomes.py backend/tests/contract/api/test_safety_notices.py backend/tests/integration/persistence/test_submission_transactions.py backend/tests/unit/test_email_validation.py backend/tests/unit/test_extraction.py backend/tests/unit/safety backend/tests/integration/graph backend/tests/integration/test_no_facts_boundaries.py
+npm run test --prefix frontend -- src/tests/submission-outcomes.test.tsx src/tests/safety-notices.test.tsx src/tests/outcome-dialog.test.tsx src/tests/intake-flow.test.tsx src/tests/human_declarations.test.tsx
 npm run typecheck --prefix frontend
 npm run lint --prefix frontend
 npm run build --prefix frontend
 ```
 
-Include new feature test files in the implementation's targeted command once created.
 The tests must explicitly prove:
 
 1. Incomplete/invalid declarations (including stored false acceptance) block finalization.
@@ -74,6 +80,11 @@ The tests must explicitly prove:
    produce one denial; a later rejected operation still receives feedback.
 10. Typed protocol/domain errors remain distinguishable; ordinary source errors do not
     become NoFacts denials, and safety notices do not trigger transport retry.
+
+Email validation is server-owned and shared by extraction and stored readiness. It enforces
+ASCII dot-atom syntax and strict IDNA2008 for every A-label, without UTS #46, transitional
+mappings, DNS lookups, or a duplicate frontend regex. Invalid stored addresses remain
+unchanged and block finalization.
 
 ## 3. Required constitutional evaluation
 
@@ -168,7 +179,8 @@ discards old links/results.
 
 ## 5. Audit-remediation regression and gate checks
 
-The following are planned commands to be added during implementation, not existing tools:
+The repository includes one required verification entry point and a conflict-aware hook
+installer:
 
 ```powershell
 pwsh -NoProfile -File scripts\install-hooks.ps1
@@ -176,18 +188,17 @@ pwsh -NoProfile -File scripts\verify.ps1 -Required
 ```
 
 Set TEST_POSTGRESQL_URL securely to a disposable database before required verification.
-The installer must inspect core.hooksPath/existing hooks and require conflict resolution
-before changing them. The pre-push launcher forwards to the same required verification
-entry point without installing dependencies or exposing credentials.
+The installer inspects `core.hooksPath` and any active `pre-push` hook before changing local
+configuration. It stops on conflicts and never overwrites an existing hook. The tracked
+`.githooks/pre-push` launcher invokes the same verifier and installs no dependencies.
 
 Required verification must run backend suites (including extraction propagation), full
 Vitest discovery, frontend lint/type/build, complete golden evaluation, and PostgreSQL
 race/migration checks. The verifier sets VERIFY_REQUIRED=1 for its child test processes;
 database fixtures must fail on missing TEST_POSTGRESQL_URL in that mode, not skip.
-CI provisions a disposable PostgreSQL service and uses the same
-entry point. Missing prerequisites or intentionally failing sentinel checks must return
-nonzero through both launchers; use isolated fixture repositories/workflows for failure
-probes, never break a shared branch to demonstrate a gate.
+CI provisions a disposable PostgreSQL service and invokes the same entry point. Missing
+prerequisites or failing child commands must return nonzero through both launchers; gate
+regressions use isolated fixture repositories, never a deliberately broken shared branch.
 
 Verify no executable .disabled workflows exist and all required jobs run on PRs. Inspect
 GitHub required-check settings using authorized access; if unavailable or not configured,

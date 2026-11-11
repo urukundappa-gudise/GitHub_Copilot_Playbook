@@ -38,4 +38,31 @@ export default [
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },
+  {
+    files: [
+      'src/App.tsx',
+      'src/services/intake.ts',
+      'src/components/IntakeChat.tsx',
+      'src/components/HumanDeclarations.tsx',
+      'src/components/SourcePicker.tsx',
+      'src/components/OutcomeDialog.tsx',
+      'src/components/SafetyDenialBanner.tsx',
+      'src/tests/submission-outcomes.test.tsx',
+      'src/tests/safety-notices.test.tsx',
+      'src/tests/outcome-dialog.test.tsx',
+    ],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: { attributes: false } }],
+      '@typescript-eslint/no-non-null-assertion': 'error',
+      'no-unreachable': 'error',
+    },
+  },
 ];

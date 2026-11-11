@@ -17,7 +17,14 @@ describe('intake flow', () => {
   it('creates a session, submits chat, and renders safe field updates', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ session_id: sessionId, status: 'in_progress', schema_version: 'active' }, 201))
-      .mockResolvedValueOnce(response({ session_id: sessionId, schema_version: 'active', sections: [], status: 'in_progress' }))
+      .mockResolvedValueOnce(response({
+        session_id: sessionId,
+        schema_version: 'active',
+        sections: [],
+        status: 'in_progress',
+        submitted_at: null,
+        readiness: { ready: false, missing_fields: [], invalid_fields: [] },
+      }))
       .mockResolvedValueOnce(response({
         request_id: 'request-1',
         field_updates: [{ field_key: 'problem_statement', value: 'Policy discovery is difficult.', origin: 'ai_extracted' }],
@@ -40,7 +47,14 @@ describe('intake flow', () => {
   it('offers file and audio selection and reports upload errors generically', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ session_id: sessionId, status: 'in_progress', schema_version: 'active' }, 201))
-      .mockResolvedValueOnce(response({ session_id: sessionId, schema_version: 'active', sections: [], status: 'in_progress' }))
+      .mockResolvedValueOnce(response({
+        session_id: sessionId,
+        schema_version: 'active',
+        sections: [],
+        status: 'in_progress',
+        submitted_at: null,
+        readiness: { ready: false, missing_fields: [], invalid_fields: [] },
+      }))
       .mockResolvedValueOnce(response({ error: { code: 'SOURCE_INVALID', message: 'This source could not be processed.' } }, 400));
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);

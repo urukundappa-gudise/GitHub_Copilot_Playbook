@@ -32,6 +32,15 @@ _QUALIFIER_WITH_WORD_NUMBER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _VALIDATION_TOKEN = object()
+_CATEGORY_ORDER = ("number", "percentage", "cost", "date", "word_quantity")
+_CATEGORY_PATTERNS = (
+    ("number", _DIGIT_PATTERN),
+    ("percentage", _PERCENT_PATTERN),
+    ("cost", _CURRENCY_PATTERN),
+    ("date", _DATE_PATTERN),
+    ("word_quantity", _WORD_QUANTITY_PATTERN),
+    ("word_quantity", _QUALIFIER_WITH_WORD_NUMBER_PATTERN),
+)
 
 
 class _NoFactsValidatedCandidate(dict[str, str]):
@@ -72,26 +81,18 @@ def _iter_text_leaves(candidate: Any) -> Iterable[str]:
             yield from _iter_text_leaves(item)
 
 
-def _contains_unverified_quantity(text: str) -> bool:
-    return any(
-        pattern.search(text)
-        for pattern in (
-            _DIGIT_PATTERN,
-            _PERCENT_PATTERN,
-            _CURRENCY_PATTERN,
-            _DATE_PATTERN,
-            _WORD_QUANTITY_PATTERN,
-            _QUALIFIER_WITH_WORD_NUMBER_PATTERN,
+def classify_no_facts(candidate: Any) -> tuple[str, ...]:
+    matched: set[str] = set()
+    for leaf_text in _iter_text_leaves(candidate):
+        matched.update(
+            category for category, pattern in _CATEGORY_PATTERNS if pattern.search(leaf_text)
         )
-    )
+    return tuple(category for category in _CATEGORY_ORDER if category in matched)
 
 
 def no_facts_decision(candidate: Any) -> str:
     """Return ``pass`` or ``drop`` for one candidate."""
-    for leaf_text in _iter_text_leaves(candidate):
-        if _contains_unverified_quantity(leaf_text):
-            return "drop"
-    return "pass"
+    return "drop" if classify_no_facts(candidate) else "pass"
 
 
 def passes_no_facts(candidate: Any) -> bool:

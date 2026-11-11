@@ -5,6 +5,9 @@ type Props = {
   sessionId: string;
   fields: IntakeFieldState[];
   onSaved: (update: HumanFieldUpdate) => void;
+  disabled?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
 };
 
 const FIELD_KEYS = {
@@ -18,7 +21,14 @@ function savedValues(fields: IntakeFieldState[]): Map<string, string> {
   return new Map(fields.map((field) => [field.field_key, field.value ?? '']));
 }
 
-export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
+export function HumanDeclarations({
+  sessionId,
+  fields,
+  onSaved,
+  disabled = false,
+  onDirtyChange,
+  onBusyChange,
+}: Props) {
   const initialValues = savedValues(fields);
   const [accepted, setAccepted] = useState(
     initialValues.get(FIELD_KEYS.accepted) === 'true',
@@ -29,6 +39,19 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const previousValues = useRef(initialValues);
+  const dirty =
+    accepted !== (initialValues.get(FIELD_KEYS.accepted) === 'true') ||
+    signature !== (initialValues.get(FIELD_KEYS.signature) ?? '') ||
+    date !== (initialValues.get(FIELD_KEYS.date) ?? '') ||
+    notes !== (initialValues.get(FIELD_KEYS.notes) ?? '');
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
   useEffect(() => {
     const currentValues = savedValues(fields);
@@ -91,6 +114,7 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
             type="checkbox"
             required
             checked={accepted}
+            disabled={disabled || busy}
             onChange={(event) => setAccepted(event.target.checked)}
           />
           <span>Declaration Accepted</span>
@@ -103,6 +127,7 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
           autoComplete="name"
           required
           value={signature}
+          disabled={disabled || busy}
           onChange={(event) => setSignature(event.target.value)}
         />
         <label className="human-field-label" htmlFor="date-of-submission">Date of Submission</label>
@@ -112,9 +137,10 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
           type="date"
           required
           value={date}
+          disabled={disabled || busy}
           onChange={(event) => setDate(event.target.value)}
         />
-        <button className="human-save-button" type="submit" disabled={busy}>
+        <button className="human-save-button" type="submit" disabled={disabled || busy}>
           Save Declaration
         </button>
       </form>
@@ -126,9 +152,10 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
           rows={3}
           maxLength={4000}
           value={notes}
+          disabled={disabled || busy}
           onChange={(event) => setNotes(event.target.value)}
         />
-        <button className="human-save-button secondary" type="submit" disabled={busy || !notes.trim()}>
+        <button className="human-save-button secondary" type="submit" disabled={disabled || busy || !notes.trim()}>
           Save Reviewer Notes
         </button>
       </form>

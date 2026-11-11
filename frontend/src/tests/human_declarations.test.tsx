@@ -28,6 +28,8 @@ describe('human declarations', () => {
         schema_version: 'active',
         sections: [{ section_key: 'section_06', fields: humanFields }],
         status: 'in_progress',
+        submitted_at: null,
+        readiness: { ready: false, missing_fields: [], invalid_fields: [] },
       }))
       .mockResolvedValueOnce(response({
         request_id: 'request-ai-fields',
