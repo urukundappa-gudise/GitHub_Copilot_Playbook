@@ -4,9 +4,10 @@ type Props = {
   open: boolean;
   onDismiss: () => void;
   onStartNew: () => void;
+  onFailure?: () => void;
 };
 
-export function OutcomeDialog({ open, onDismiss, onStartNew }: Props) {
+export function OutcomeDialog({ open, onDismiss, onStartNew, onFailure }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const startButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -15,24 +16,38 @@ export function OutcomeDialog({ open, onDismiss, onStartNew }: Props) {
     if (!dialog) return;
     if (open) {
       try {
-        if (typeof dialog.showModal === 'function') dialog.showModal();
-        else dialog.setAttribute('open', '');
+        if (typeof dialog.showModal !== 'function') throw new Error('Modal dialog is unavailable.');
+        if (!dialog.open) dialog.showModal();
         startButtonRef.current?.focus();
       } catch {
-        dialog.setAttribute('open', '');
+        dialog.removeAttribute('open');
+        onFailure?.();
       }
     } else if (dialog.open) {
-      if (typeof dialog.close === 'function') dialog.close();
-      else dialog.removeAttribute('open');
+      try {
+        dialog.close();
+      } catch {
+        dialog.removeAttribute('open');
+        onFailure?.();
+      }
     }
-  }, [open]);
+    return () => {
+      if (dialog.open) {
+        try { dialog.close(); }
+        catch { dialog.removeAttribute('open'); }
+      }
+    };
+  }, [open, onFailure]);
 
   function dismiss(event?: SyntheticEvent<HTMLDialogElement>) {
     event?.preventDefault();
     const dialog = dialogRef.current;
     if (dialog?.open) {
-      if (typeof dialog.close === 'function') dialog.close();
-      else dialog.removeAttribute('open');
+      try { dialog.close(); }
+      catch {
+        dialog.removeAttribute('open');
+        onFailure?.();
+      }
     }
     onDismiss();
   }

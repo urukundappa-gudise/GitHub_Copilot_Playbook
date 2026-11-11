@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
+import { HumanDeclarations } from '../components/HumanDeclarations';
 
 const sessionId = 'session-human-fields';
 const humanFields = [
@@ -19,6 +20,32 @@ function response(body: unknown, status = 200): Response {
 
 describe('human declarations', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps saves busy after one sibling fails and suppresses callbacks after unmount', async () => {
+    let finish: (value: Response) => void = () => { throw new Error('Pending save not started'); };
+    const pending = new Promise<Response>((resolve) => { finish = resolve; });
+    vi.stubGlobal('fetch', vi.fn()
+      .mockRejectedValueOnce(new Error('one save failed'))
+      .mockReturnValueOnce(pending)
+      .mockReturnValueOnce(pending));
+    const saved = vi.fn();
+    const busy = vi.fn();
+    const view = render(<HumanDeclarations sessionId={sessionId} fields={humanFields} onSaved={saved} onBusyChange={busy} />);
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByLabelText(/submitter signature/i), { target: { value: 'Example' } });
+    fireEvent.change(screen.getByLabelText(/date of submission/i), { target: { value: '2026-11-11' } });
+    const form = screen.getByRole('button', { name: /save declaration/i }).closest('form');
+    if (!form) throw new Error('Declaration form missing');
+    fireEvent.submit(form);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole('button', { name: /save declaration/i })).toBeDisabled();
+    expect(busy).toHaveBeenLastCalledWith(true);
+    view.unmount();
+    await act(async () => {
+      finish(response({ field_key: 'submitter_signature', value: 'Example', origin: 'human_entered' }));
+    });
+    expect(saved).not.toHaveBeenCalled();
+  });
 
   it('keeps AI updates out of human controls and saves explicit human input', async () => {
     const fetchMock = vi.fn()

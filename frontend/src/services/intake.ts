@@ -243,6 +243,8 @@ function decodeFieldState(value: unknown): FieldResponse {
   ) {
     return protocolError();
   }
+  if (value.status === 'submitted') decodeSubmissionReceipt(value);
+  else if (value.submitted_at !== null) return protocolError();
   const sections: FieldResponse['sections'] = [];
   for (const section of value.sections) {
     if (!isRecord(section) || typeof section.section_key !== 'string' || !Array.isArray(section.fields)) {
@@ -367,13 +369,21 @@ export function createSession(): Promise<IntakeSession> {
 }
 
 export function getFieldState(sessionId: string): Promise<FieldResponse> {
-  return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/fields`, decodeFieldState);
+  return request(`/api/v1/sessions/${encodeURIComponent(sessionId)}/fields`, (value) => {
+    const state = decodeFieldState(value);
+    if (state.session_id !== sessionId) return protocolError();
+    return state;
+  });
 }
 
 export function submitSession(sessionId: string): Promise<SubmissionReceipt> {
   return request(
     `/api/v1/sessions/${encodeURIComponent(sessionId)}/submit`,
-    decodeSubmissionReceipt,
+    (value) => {
+      const receipt = decodeSubmissionReceipt(value);
+      if (receipt.session_id !== sessionId) return protocolError();
+      return receipt;
+    },
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) },
   );
 }
@@ -453,24 +463,36 @@ export function connectIntakeSocket(sessionId: string): Promise<{
       resolve(null);
       return;
     }
-    const timeout = window.setTimeout(() => {
+    const cleanupConnection = () => {
+      window.clearTimeout(timeout);
+      socket.removeEventListener('open', onOpen);
+      socket.removeEventListener('error', onConnectionFailure);
+      socket.removeEventListener('close', onConnectionFailure);
+    };
+    const onConnectionFailure = () => {
+      cleanupConnection();
       socket.close();
       resolve(null);
-    }, 1200);
-    socket.addEventListener('open', () => {
-      window.clearTimeout(timeout);
+    };
+    const timeout = window.setTimeout(onConnectionFailure, 1200);
+    const onOpen = () => {
+      cleanupConnection();
       resolve({
         sendMessage: (text, selectedRequestId) => new Promise((complete, fail) => {
           const requestId = selectedRequestId ?? crypto.randomUUID();
           const updates: IntakeResult['field_updates'] = [];
           let clarification: IntakeResult['clarification'] = null;
           let timeout: number;
+          let settled = false;
           const cleanup = () => {
             window.clearTimeout(timeout);
             socket.removeEventListener('message', onEvent);
             socket.removeEventListener('close', onClose);
+            socket.removeEventListener('error', onError);
           };
           const failRequest = (error: Error = new IntakeTransportError()) => {
+            if (settled) return;
+            settled = true;
             cleanup();
             fail(error);
           };
@@ -536,6 +558,7 @@ export function connectIntakeSocket(sessionId: string): Promise<{
                   result.safety_notice = decodeSafetyNotice(payload.safety_notice);
                 }
                 cleanup();
+                settled = true;
                 complete(result);
               } catch {
                 failRequest(new IntakeProtocolError());
@@ -543,18 +566,22 @@ export function connectIntakeSocket(sessionId: string): Promise<{
             }
           };
           const onClose = () => failRequest();
-          timeout = window.setTimeout(failRequest, 15000);
+          const onError = () => failRequest();
+          timeout = window.setTimeout(() => failRequest(), 15000);
           socket.addEventListener('message', onEvent);
           socket.addEventListener('close', onClose, { once: true });
-          socket.send(JSON.stringify({ type: 'client.message', request_id: requestId, payload: { text } }));
+          socket.addEventListener('error', onError, { once: true });
+          try {
+            socket.send(JSON.stringify({ type: 'client.message', request_id: requestId, payload: { text } }));
+          } catch {
+            failRequest();
+          }
         }),
         close: () => socket.close(),
       });
-    });
-    socket.addEventListener('error', () => {
-      window.clearTimeout(timeout);
-      socket.close();
-      resolve(null);
-    }, { once: true });
+    };
+    socket.addEventListener('open', onOpen);
+    socket.addEventListener('error', onConnectionFailure);
+    socket.addEventListener('close', onConnectionFailure);
   });
 }

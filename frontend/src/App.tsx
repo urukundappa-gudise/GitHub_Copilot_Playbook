@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { IntakeChat } from './components/IntakeChat';
 import { HumanDeclarations } from './components/HumanDeclarations';
 import { OutcomeDialog } from './components/OutcomeDialog';
@@ -6,6 +6,7 @@ import { SafetyDenialBanner } from './components/SafetyDenialBanner';
 import { SourcePicker } from './components/SourcePicker';
 import {
   connectIntakeSocket,
+  decodeSubmissionReceipt,
   createSession,
   getFieldState,
   IntakeServiceError,
@@ -61,8 +62,40 @@ export default function App() {
   const closeSocketRef = useRef<(() => void) | undefined>(undefined);
   const generationRef = useRef(0);
   const seenNoticeKeysRef = useRef(new Set<string>());
+  const correctionTargetRef = useRef<string | null>(null);
+  const mountedRef = useRef(false);
+  const sessionRef = useRef(sessionId);
+  const lifecycleRef = useRef(lifecycle);
+  const activeCountRef = useRef(0);
+  const focusFrames = useRef(new Set<number>());
+  sessionRef.current = sessionId;
+
+  function isCurrent() {
+    return mountedRef.current && generationRef.current === generation && sessionRef.current === sessionId;
+  }
+
+  function transition(next: Lifecycle) {
+    lifecycleRef.current = next;
+    setLifecycle(next);
+  }
+
+  function scheduleFocus(action: () => void) {
+    const frame = window.requestAnimationFrame(() => {
+      focusFrames.current.delete(frame);
+      if (mountedRef.current && generationRef.current === generation) action();
+    });
+    focusFrames.current.add(frame);
+  }
+
+  const dialogFailure = useCallback(() => {
+    if (!mountedRef.current) return;
+    setDialogOpen(false);
+    setError('Your idea is submitted, but the confirmation dialog could not be displayed. Use the submitted summary to start a new idea.');
+  }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
+    const frames = focusFrames.current;
     let active = true;
     createSession()
       .then(async (session) => {
@@ -90,6 +123,9 @@ export default function App() {
       });
     return () => {
       active = false;
+      mountedRef.current = false;
+      frames.forEach((frame) => window.cancelAnimationFrame(frame));
+      frames.clear();
       closeSocketRef.current?.();
     };
   }, []);
@@ -101,12 +137,14 @@ export default function App() {
   }, [dialogOpen, lifecycle, receipt]);
 
   async function handleMessage(text: string): Promise<IntakeResult> {
-    if (!sessionId) throw new Error('Session is unavailable.');
+    if (!sessionId || !isCurrent() || lifecycleRef.current !== 'editing') throw new Error('Session is unavailable.');
     const requestId = crypto.randomUUID();
-    const linkedNotice = correctionTarget;
+    const linkedNotice = correctionTargetRef.current;
     const initiatingControl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setCorrectionTarget(null);
-    setActiveOperations((count) => count + 1);
+    correctionTargetRef.current = null;
+    activeCountRef.current += 1;
+    setActiveOperations(activeCountRef.current);
     setError('');
     try {
       const result = sendOverSocket
@@ -120,6 +158,9 @@ export default function App() {
         if (error instanceof IntakeServiceError || error instanceof IntakeProtocolError) throw error;
         throw error;
       }
+      if (!isCurrent()) throw error;
+      closeSocketRef.current?.();
+      closeSocketRef.current = undefined;
       setSendOverSocket(undefined);
       try {
         const result = await sendMessage(sessionId, text, requestId);
@@ -127,33 +168,41 @@ export default function App() {
         applyResult(safeResult, linkedNotice, initiatingControl);
         return safeResult;
       } catch {
-        setError('Your message could not be processed. Please try again.');
+        if (isCurrent()) setError('Your message could not be processed. Please try again.');
         throw new Error('Message could not be processed.');
       }
     } finally {
-      setActiveOperations((count) => Math.max(0, count - 1));
+      if (isCurrent()) {
+        activeCountRef.current -= 1;
+        setActiveOperations(activeCountRef.current);
+      }
     }
   }
 
   async function handleSource(file: File): Promise<void> {
-    if (!sessionId) return;
+    if (!sessionId || !isCurrent() || lifecycleRef.current !== 'editing') return;
     if (!isSupportedSource(file)) {
       setError('This source could not be processed.');
       return;
     }
     const requestId = crypto.randomUUID();
-    const linkedNotice = correctionTarget;
+    const linkedNotice = correctionTargetRef.current;
     const initiatingControl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setCorrectionTarget(null);
-    setActiveOperations((count) => count + 1);
+    correctionTargetRef.current = null;
+    activeCountRef.current += 1;
+    setActiveOperations(activeCountRef.current);
     setError('');
     try {
       const result = await uploadSource(sessionId, file, requestId);
-      applyResult(result, linkedNotice, initiatingControl);
+      applyResult(filterAiUpdates(result), linkedNotice, initiatingControl);
     } catch {
-      setError('This source could not be processed.');
+      if (isCurrent()) setError('This source could not be processed.');
     } finally {
-      setActiveOperations((count) => Math.max(0, count - 1));
+      if (isCurrent()) {
+        activeCountRef.current -= 1;
+        setActiveOperations(activeCountRef.current);
+      }
     }
   }
 
@@ -162,7 +211,7 @@ export default function App() {
     linkedNotice: string | null = null,
     initiatingControl: HTMLElement | null = null,
   ) {
-    if (generationRef.current !== generation) return;
+    if (!isCurrent() || lifecycleRef.current !== 'editing') return;
     setStatus(result.status);
     setFields((current) => {
       const next = new Map(current.map((field) => [field.field_key, field]));
@@ -205,8 +254,9 @@ export default function App() {
     seenNoticeKeysRef.current.add(key);
     setNotices((current) => current.filter((item) => item.key !== key));
     setCorrectionTarget((current) => current === key ? null : current);
+    if (correctionTargetRef.current === key) correctionTargetRef.current = null;
     if (focusWasInside) {
-      window.requestAnimationFrame(() => {
+      scheduleFocus(() => {
         if (entry?.initiatingControl?.isConnected) entry.initiatingControl.focus();
         else document.getElementById('intake-message')?.focus();
       });
@@ -214,14 +264,17 @@ export default function App() {
   }
 
   function selectCorrection(key: string) {
+    correctionTargetRef.current = key;
     setCorrectionTarget(key);
     document.getElementById('intake-message')?.focus();
   }
 
   function cancelCorrection() {
-    const selected = correctionTarget;
+    const selected = correctionTargetRef.current;
+    correctionTargetRef.current = null;
     setCorrectionTarget(null);
-    window.requestAnimationFrame(() => {
+    correctionTargetRef.current = null;
+    scheduleFocus(() => {
       const selectedBanner = [...document.querySelectorAll<HTMLElement>('[data-notice-key]')]
         .find((banner) => banner.dataset.noticeKey === selected);
       const correctionButton = selectedBanner?.querySelector<HTMLButtonElement>('[data-correction-action]');
@@ -240,6 +293,7 @@ export default function App() {
   }
 
   function applyHumanUpdate(update: HumanFieldUpdate) {
+    if (!isCurrent() || lifecycleRef.current !== 'editing') return;
     setFields((current) => current.map((field) => (
       field.field_key === update.field_key
         ? { ...field, value: update.value, origin: update.origin }
@@ -248,7 +302,7 @@ export default function App() {
   }
 
   async function submitIdea() {
-    if (!sessionId || lifecycle !== 'editing') return;
+    if (!sessionId || !isCurrent() || lifecycleRef.current !== 'editing') return;
     if (declarationDirty) {
       setError('Save your declaration and notes before submitting.');
       return;
@@ -257,34 +311,38 @@ export default function App() {
       setError('Wait for your declaration save to finish before submitting.');
       return;
     }
-    if (activeOperations > 0) {
+    if (activeCountRef.current > 0) {
       setError('Wait for active messages, uploads, and saves to finish before submitting.');
       return;
     }
-    setLifecycle('submitting');
+    transition('submitting');
     setError('');
     let current;
     try {
       current = await getFieldState(sessionId);
+      if (!isCurrent()) return;
       setReadiness(current.readiness);
     } catch {
+      if (!isCurrent()) return;
       setError('The current submission readiness could not be checked. Try again before submitting.');
-      setLifecycle('editing');
+      transition('editing');
       return;
     }
     if (!current.readiness.ready) {
       const fieldsToFix = [...current.readiness.missing_fields, ...current.readiness.invalid_fields];
       setError(fieldsToFix.length ? `Complete or correct: ${fieldsToFix.join(', ')}.` : 'Complete all required information before submitting.');
-      setLifecycle('editing');
+      transition('editing');
       return;
     }
     try {
       const result = await submitSession(sessionId);
+      if (!isCurrent()) return;
       setReceipt(result);
       setStatus(result.status);
-      setLifecycle('confirmed');
+      transition('confirmed');
       setDialogOpen(true);
     } catch (submitError) {
+      if (!isCurrent()) return;
       if (submitError instanceof IntakeServiceError && submitError.code === 'SUBMISSION_INCOMPLETE') {
         setReadiness({
           ready: false,
@@ -292,11 +350,11 @@ export default function App() {
           invalid_fields: submitError.invalid_fields,
         });
         setError('Complete or correct the required information and save your declaration before submitting.');
-        setLifecycle('editing');
+        transition('editing');
         return;
       }
       setError('The submission result is not yet known. Check its status before continuing.');
-      setLifecycle('outcome_unknown');
+      transition('outcome_unknown');
     }
   }
 
@@ -305,29 +363,31 @@ export default function App() {
     setError('');
     try {
       const current = await getFieldState(sessionId);
+      if (!isCurrent()) return;
       setReadiness(current.readiness);
       if (current.status === 'submitted' && current.submitted_at) {
-        const confirmed = {
+        const confirmed = decodeSubmissionReceipt({
           session_id: sessionId,
-          status: 'submitted' as const,
+          status: 'submitted',
           submitted_at: current.submitted_at,
-        };
+        });
         setReceipt(confirmed);
         setStatus(confirmed.status);
-        setLifecycle('confirmed');
+        transition('confirmed');
         setDialogOpen(true);
         return;
       }
-      setLifecycle('editing');
+      transition('editing');
       setError('The idea is still in progress. You can retry Submit for this same idea.');
     } catch {
+      if (!isCurrent()) return;
       setError('The submission status could not be checked. Retry the status check for this same idea.');
     }
   }
 
   async function startNewIdea() {
-    if (lifecycle !== 'confirmed' && lifecycle !== 'fresh_start_failed') return;
-    setLifecycle('starting_fresh');
+    if (!isCurrent() || (lifecycleRef.current !== 'confirmed' && lifecycleRef.current !== 'fresh_start_failed')) return;
+    transition('starting_fresh');
     setDialogOpen(false);
     setError('');
     closeSocketRef.current?.();
@@ -337,13 +397,19 @@ export default function App() {
       let candidateSessionId = nextSessionId;
       if (!candidateSessionId) {
         const nextSession = await createSession();
+        if (!isCurrent()) return;
         candidateSessionId = nextSession.session_id;
         setNextSessionId(candidateSessionId);
       }
       const nextState = await getFieldState(candidateSessionId);
+      if (!isCurrent()) return;
       let nextConnection: Awaited<ReturnType<typeof connectIntakeSocket>> = null;
       if (import.meta.env.MODE !== 'test') {
         nextConnection = await connectIntakeSocket(candidateSessionId);
+      }
+      if (!isCurrent()) {
+        nextConnection?.close();
+        return;
       }
       setSessionId(candidateSessionId);
       setFields(nextState.sections.flatMap((section) => section.fields));
@@ -351,12 +417,12 @@ export default function App() {
       setStatus(nextState.status);
       setReceipt(undefined);
       setNextSessionId(undefined);
-      setGeneration((current) => {
-        const next = current + 1;
-        generationRef.current = next;
-        seenNoticeKeysRef.current.clear();
-        return next;
-      });
+      focusFrames.current.forEach((frame) => window.cancelAnimationFrame(frame));
+      focusFrames.current.clear();
+      generationRef.current += 1;
+      setGeneration(generationRef.current);
+      seenNoticeKeysRef.current.clear();
+      activeCountRef.current = 0;
       setActiveOperations(0);
       setDeclarationDirty(false);
       setDeclarationBusy(false);
@@ -367,10 +433,16 @@ export default function App() {
         setSendOverSocket(() => nextConnection.sendMessage);
         closeSocketRef.current = nextConnection.close;
       }
-      setLifecycle('editing');
-      window.requestAnimationFrame(() => document.getElementById('intake-message')?.focus());
+      transition('editing');
+      const nextGeneration = generationRef.current;
+      const frame = window.requestAnimationFrame(() => {
+        focusFrames.current.delete(frame);
+        if (mountedRef.current && generationRef.current === nextGeneration) document.getElementById('intake-message')?.focus();
+      });
+      focusFrames.current.add(frame);
     } catch {
-      setLifecycle('fresh_start_failed');
+      if (!isCurrent()) return;
+      transition('fresh_start_failed');
       setError('Your submitted idea is saved, but a new idea could not be prepared. Retry setup to continue.');
     }
   }
@@ -513,7 +585,7 @@ export default function App() {
       </div>
       <footer className="page-footer"><span>IDEA INTAKE</span><span>Secure employee workspace</span></footer>
       {receipt && (
-        <OutcomeDialog open={dialogOpen} onDismiss={dismissConfirmation} onStartNew={startNewIdea} />
+        <OutcomeDialog open={dialogOpen} onDismiss={dismissConfirmation} onStartNew={startNewIdea} onFailure={dialogFailure} />
       )}
     </main>
   );

@@ -7,7 +7,9 @@ See [contracts](contracts/intake-outcomes.md) and [state model](data-model.md).
 
 ## Prerequisites
 
-- Python >=3.11, uv, Node.js/npm, existing backend and frontend dependencies.
+- Python >=3.11, uv, Node.js/npm, PowerShell >=7 (`pwsh` on PATH), existing backend
+  and frontend dependencies. Frontend configuration typechecking uses the declared
+  Node 20 development types, matching the CI runtime.
 - A disposable PostgreSQL database for migration and cross-connection concurrency checks;
   SQLite remains the default isolated test path but cannot prove PostgreSQL locking.
 - Persistence tests use a per-test SQLite file by default. Optional PostgreSQL tests read
@@ -35,15 +37,19 @@ Never downgrade a shared or production database for validation.
 
 ```powershell
 Push-Location backend
-uv run alembic upgrade head
-uv run alembic current
+uv run --no-sync --locked alembic upgrade head
+uv run --no-sync --locked alembic current
 Pop-Location
 ```
 
-After implementation, verify the next revision adds nullable `submitted_at`, keeps existing
+Verify revision 0003 adds nullable `submitted_at`, keeps existing
 drafts in progress, and preserves canonical counts and constraints. On a disposable copy
 only, downgrade one revision and re-upgrade; verify draft/field rows survive. Also exercise
 fresh SQLite metadata creation and the new repository behavior in tests.
+Receipts normalize timestamps to UTC so PostgreSQL session timezone settings cannot change
+the serialized receipt on retry. Locking reads refresh already-loaded submission state.
+The existing 0002 revision widens PostgreSQL's Alembic version column to accommodate its
+long revision identifier without renaming revision history; exercise upgrade from 0001 too.
 
 ## 2. Targeted automated verification
 
@@ -51,8 +57,8 @@ Extend the existing tests rather than introducing a new runner. The following di
 and files already exist; add submission/outcome cases alongside them:
 
 ```powershell
-uv run --locked --project backend pytest -q backend/tests/contract/api/test_submission_outcomes.py backend/tests/contract/api/test_safety_notices.py backend/tests/integration/persistence/test_submission_transactions.py backend/tests/unit/test_email_validation.py backend/tests/unit/test_extraction.py backend/tests/unit/safety backend/tests/integration/graph backend/tests/integration/test_no_facts_boundaries.py
-npm run test --prefix frontend -- src/tests/submission-outcomes.test.tsx src/tests/safety-notices.test.tsx src/tests/outcome-dialog.test.tsx src/tests/intake-flow.test.tsx src/tests/human_declarations.test.tsx
+uv run --no-sync --locked --project backend pytest -q backend/tests/contract/api/test_submission_outcomes.py backend/tests/contract/api/test_safety_notices.py backend/tests/integration/persistence/test_submission_transactions.py backend/tests/unit/test_email_validation.py backend/tests/unit/test_extraction.py backend/tests/unit/safety backend/tests/integration/graph backend/tests/integration/test_no_facts_boundaries.py
+npm run test --prefix frontend -- src/tests/submission-outcomes.test.tsx src/tests/safety-notices.test.tsx src/tests/outcome-dialog.test.tsx src/tests/outcome-resources.test.tsx src/tests/intake-flow.test.tsx src/tests/human_declarations.test.tsx
 npm run typecheck --prefix frontend
 npm run lint --prefix frontend
 npm run build --prefix frontend
@@ -93,7 +99,7 @@ uv run --project backend pytest -q backend/tests/unit/evaluation/test_golden_run
 uv run --project backend python backend/scripts/run_golden_evaluation.py
 ```
 
-Expected: at least 50 cases, all six sections and all five NoFacts categories, chat/document/audio
+Expected: all 55 cases, all six sections and all five NoFacts categories, chat/document/audio
 coverage, human-only protection, and single-question pacing; 100% pass and zero omitted
 cases. Extend applicable golden expectations for safe reason metadata, preserving existing
 claims and their accepted/rejected outcomes. Do not simply tag cases without behavioral assertions.
@@ -196,6 +202,12 @@ Required verification must run backend suites (including extraction propagation)
 Vitest discovery, frontend lint/type/build, complete golden evaluation, and PostgreSQL
 race/migration checks. The verifier sets VERIFY_REQUIRED=1 for its child test processes;
 database fixtures must fail on missing TEST_POSTGRESQL_URL in that mode, not skip.
+Pytest rejects skipped/deselected or empty suites; Vitest rejects skipped, todo, or focused
+tests in required mode. Verification uses `uv run --no-sync --locked` and checks imports
+before running tests; it never restores missing dependencies itself.
+Tests explicitly load `frontend/vite.config.ts`. The Node configuration project is
+typechecked without emitting shadow JavaScript/declaration configuration files, so
+repeated builds cannot bypass the required-test policy or introduce lint failures.
 CI provisions a disposable PostgreSQL service and invokes the same entry point. Missing
 prerequisites or failing child commands must return nonzero through both launchers; gate
 regressions use isolated fixture repositories, never a deliberately broken shared branch.

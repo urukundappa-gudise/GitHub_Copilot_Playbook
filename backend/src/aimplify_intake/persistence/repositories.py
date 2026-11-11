@@ -40,7 +40,7 @@ def _ordered_canonical_keys(keys: Iterable[str]) -> list[str]:
 def _format_timestamp(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
-    return value.isoformat()
+    return value.astimezone(UTC).isoformat()
 
 
 class SubmissionPersistenceError(Exception):
@@ -111,6 +111,7 @@ def ensure_canonical_schema(session: Session) -> None:
             mandatory_count=sum(bool(field["mandatory"]) for field in schema.fields),
         )
     )
+    session.flush()
     session.add_all(
         IntakeSection(
             schema_version=schema.schema_version,
@@ -163,7 +164,9 @@ def get_submission_readiness(session: Session, submission: IdeaSubmission) -> di
     stored_values = {
         item.field_key: item
         for item in session.scalars(
-            select(FieldValue).where(FieldValue.submission_id == submission.submission_id)
+            select(FieldValue)
+            .where(FieldValue.submission_id == submission.submission_id)
+            .execution_options(populate_existing=True)
         )
     }
     declaration_keys = {"declaration_accepted", "date_of_submission", "submitter_signature"}
@@ -220,6 +223,7 @@ def _lock_submission_for_write(
             IdeaSubmission.subject_ref == subject_ref,
         )
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if submission is None:
         raise SubmissionNotFoundError()
@@ -243,6 +247,7 @@ def finalize_submission(session: Session, submission_id: str, subject_ref: str) 
                 IdeaSubmission.subject_ref == subject_ref,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if submission is None:
             raise SubmissionNotFoundError()
@@ -286,7 +291,9 @@ def read_field_state(session: Session, submission: IdeaSubmission) -> dict[str, 
     values = {
         item.field_key: item
         for item in session.scalars(
-            select(FieldValue).where(FieldValue.submission_id == submission.submission_id)
+            select(FieldValue)
+            .where(FieldValue.submission_id == submission.submission_id)
+            .execution_options(populate_existing=True)
         )
     }
     sections = []

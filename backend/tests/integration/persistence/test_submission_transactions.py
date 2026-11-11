@@ -6,17 +6,21 @@ from threading import Barrier
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import inspect, select, text
+from sqlalchemy.exc import IntegrityError
 
-from aimplify_intake.persistence.models import FieldValue, IdeaSubmission
+from aimplify_intake.persistence.models import Base, FieldValue, IdeaSubmission
 from aimplify_intake.persistence.repositories import (
     SubmissionClosedError,
+    SubmissionIncompleteError,
     SubmissionNotFoundError,
     create_submission,
     finalize_submission,
     get_submission_readiness,
     persist_human_values,
+    persist_ai_values,
 )
+from aimplify_intake.services.extraction import extract_safe_candidates
 from aimplify_intake.schema.registry import load_canonical_schema
 
 
@@ -71,6 +75,41 @@ def test_finalization_commits_one_immutable_receipt(persistence_sessions) -> Non
     assert first["submitted_at"]
 
 
+@pytest.mark.parametrize("operation", ["human", "ai", "retry"])
+def test_preloaded_parent_is_refreshed_after_other_transaction_submits(
+    persistence_sessions, operation: str
+) -> None:
+    with persistence_sessions() as setup:
+        submission = create_submission(setup, "employee-1")
+        submission_id = submission.submission_id
+        _fill_required_fields(setup, submission_id)
+    with persistence_sessions() as stale:
+        cached = stale.get(IdeaSubmission, submission_id)
+        assert cached is not None
+        with persistence_sessions() as other:
+            receipt = finalize_submission(other, submission_id, "employee-1")
+        if operation == "retry":
+            assert finalize_submission(stale, submission_id, "employee-1") == receipt
+        else:
+            with pytest.raises(SubmissionClosedError):
+                if operation == "human":
+                    persist_human_values(stale, cached, {"submitter_signature": "Late change"})
+                else:
+                    updates = extract_safe_candidates(
+                        "", lambda _text: {"problem_statement": "Late safe change"}
+                    )
+                    persist_ai_values(stale, cached, updates)
+        stale.rollback()
+    with persistence_sessions() as check:
+        stored = check.get(IdeaSubmission, submission_id)
+        assert stored is not None
+        assert stored.status == "submitted"
+        assert all(
+            item.value not in {"Late change", "Late safe change"}
+            for item in check.scalars(select(FieldValue).where(FieldValue.submission_id == submission_id))
+        )
+
+
 def test_concurrent_finalization_returns_one_receipt(persistence_sessions) -> None:
     with persistence_sessions() as session:
         submission = create_submission(session, "employee-1")
@@ -88,7 +127,32 @@ def test_concurrent_finalization_returns_one_receipt(persistence_sessions) -> No
     assert receipts[0] == receipts[1]
 
 
-def test_human_write_racing_finalization_is_serialized(persistence_sessions) -> None:
+def test_finalization_refreshes_preloaded_values_after_another_transaction_revokes_acceptance(persistence_sessions) -> None:
+    with persistence_sessions() as setup:
+        submission = create_submission(setup, "employee-1")
+        submission_id = submission.submission_id
+        _fill_required_fields(setup, submission_id)
+    with persistence_sessions() as stale:
+        parent = stale.get(IdeaSubmission, submission_id)
+        cached = stale.scalar(select(FieldValue).where(
+            FieldValue.submission_id == submission_id,
+            FieldValue.field_key == "declaration_accepted",
+        ))
+        assert parent is not None and cached is not None and cached.value == "true"
+        with persistence_sessions() as writing:
+            current = writing.get(IdeaSubmission, submission_id)
+            assert current is not None
+            persist_human_values(writing, current, {"declaration_accepted": False})
+            writing.commit()
+        with pytest.raises(SubmissionIncompleteError) as rejected:
+            finalize_submission(stale, submission_id, "employee-1")
+        assert rejected.value.invalid_fields == ["declaration_accepted"]
+        assert parent.status == "in_progress"
+        assert cached.value == "false"
+
+
+@pytest.mark.parametrize("writer", ["human", "ai"])
+def test_human_write_racing_finalization_is_serialized(persistence_sessions, writer: str) -> None:
     with persistence_sessions() as session:
         submission = create_submission(session, "employee-1")
         _fill_required_fields(session, submission.submission_id)
@@ -100,11 +164,12 @@ def test_human_write_racing_finalization_is_serialized(persistence_sessions) -> 
             assert loaded is not None
             barrier.wait()
             try:
-                persist_human_values(
-                    session,
-                    loaded,
-                    {"submitter_signature": "Updated signature"},
-                )
+                if writer == "human":
+                    persist_human_values(session, loaded, {"submitter_signature": "Updated signature"})
+                else:
+                    persist_ai_values(session, loaded, extract_safe_candidates(
+                        "", lambda _text: {"problem_statement": "Updated problem"}
+                    ))
                 session.commit()
                 return "written"
             except SubmissionClosedError:
@@ -125,14 +190,107 @@ def test_human_write_racing_finalization_is_serialized(persistence_sessions) -> 
         stored = session.scalar(
             select(FieldValue).where(
                 FieldValue.submission_id == submission.submission_id,
-                FieldValue.field_key == "submitter_signature",
+                FieldValue.field_key == ("submitter_signature" if writer == "human" else "problem_statement"),
             )
         )
 
     assert receipt["status"] == "submitted"
     assert write_result in {"written", "closed"}
     assert stored is not None
-    assert stored.value in {"Updated signature", "A qualitative test response."}
+    expected = ("Updated signature" if writer == "human" else "Updated problem") if write_result == "written" else "A qualitative test response."
+    assert stored.value == expected
+
+
+@pytest.mark.parametrize("key", [
+    field["key"] for field in load_canonical_schema()["fields"] if field["mandatory"]
+])
+def test_each_mandatory_field_is_required(persistence_sessions, key: str) -> None:
+    with persistence_sessions() as session:
+        submission = create_submission(session, "employee-1")
+        _fill_required_fields(session, submission.submission_id)
+        value = session.scalar(select(FieldValue).where(
+            FieldValue.submission_id == submission.submission_id, FieldValue.field_key == key
+        ))
+        session.delete(value)
+        session.commit()
+        readiness = get_submission_readiness(session, submission)
+        assert readiness == {"ready": False, "missing_fields": [key], "invalid_fields": []}
+
+
+@pytest.mark.parametrize("key,value", [
+    ("declaration_accepted", "false"), ("declaration_accepted", "True"),
+    ("declaration_accepted", "1"), ("date_of_submission", "invalid-date"),
+    ("submitter_signature", " "), ("submitter_email", "user@example.c"),
+])
+def test_invalid_stored_required_values_are_not_rewritten(persistence_sessions, key, value) -> None:
+    with persistence_sessions() as session:
+        submission = create_submission(session, "employee-1")
+        _fill_required_fields(session, submission.submission_id)
+        item = session.scalar(select(FieldValue).where(
+            FieldValue.submission_id == submission.submission_id, FieldValue.field_key == key
+        ))
+        assert item is not None
+        item.value = value
+        session.commit()
+        readiness = get_submission_readiness(session, submission)
+        assert readiness["invalid_fields"] == [key]
+        assert readiness["ready"] is False
+        assert item.value == value
+
+
+def test_optional_blank_notes_do_not_block_readiness(persistence_sessions) -> None:
+    with persistence_sessions() as session:
+        submission = create_submission(session, "employee-1")
+        _fill_required_fields(session, submission.submission_id)
+        session.add(FieldValue(submission_id=submission.submission_id, field_key="reviewer_notes", value="", origin="human_entered"))
+        session.commit()
+        assert get_submission_readiness(session, submission)["ready"] is True
+
+
+@pytest.mark.parametrize("key", ["declaration_accepted", "submitter_signature", "date_of_submission"])
+def test_each_declaration_rejects_ai_origin_without_changing_the_saved_value(persistence_sessions, key: str) -> None:
+    with persistence_sessions() as session:
+        submission = create_submission(session, "employee-1")
+        _fill_required_fields(session, submission.submission_id)
+        item = session.scalar(select(FieldValue).where(
+            FieldValue.submission_id == submission.submission_id, FieldValue.field_key == key
+        ))
+        assert item is not None
+        saved = item.value
+        item.origin = "ai_extracted"
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+        assert item.origin == "human_entered"
+        assert item.value == saved
+        assert get_submission_readiness(session, submission)["ready"] is True
+
+
+@pytest.mark.parametrize("writer", ["human", "ai"])
+def test_committed_write_is_retained_when_finalization_follows(persistence_sessions, writer: str) -> None:
+    with persistence_sessions() as setup:
+        submission = create_submission(setup, "employee-1")
+        submission_id = submission.submission_id
+        _fill_required_fields(setup, submission_id)
+    with persistence_sessions() as writing:
+        loaded = writing.get(IdeaSubmission, submission_id)
+        assert loaded is not None
+        if writer == "human":
+            persist_human_values(writing, loaded, {"submitter_signature": "Before submission"})
+        else:
+            persist_ai_values(writing, loaded, extract_safe_candidates(
+                "", lambda _text: {"problem_statement": "Before submission"}
+            ))
+        writing.commit()
+    with persistence_sessions() as finalizing:
+        receipt = finalize_submission(finalizing, submission_id, "employee-1")
+    with persistence_sessions() as check:
+        item = check.scalar(select(FieldValue).where(
+            FieldValue.submission_id == submission_id,
+            FieldValue.field_key == ("submitter_signature" if writer == "human" else "problem_statement"),
+        ))
+        assert item is not None and item.value == "Before submission"
+        assert receipt == finalize_submission(check, submission_id, "employee-1")
 
 
 def test_human_write_rechecks_owner_inside_the_transaction(persistence_sessions) -> None:
@@ -156,14 +314,14 @@ def test_human_write_rechecks_owner_inside_the_transaction(persistence_sessions)
     assert values == []
 
 
-def test_submission_timestamp_migration_roundtrips_without_losing_drafts(tmp_path: Path) -> None:
+def test_submission_timestamp_migration_roundtrips_without_losing_drafts(persistence_engine) -> None:
     backend_dir = Path(__file__).resolve().parents[3]
-    database_path = (tmp_path / "migration.sqlite3").as_posix()
+    engine = persistence_engine
+    Base.metadata.drop_all(engine)
     config = Config(str(backend_dir / "alembic.ini"))
     config.set_main_option("script_location", str(backend_dir / "alembic"))
-    config.set_main_option("sqlalchemy.url", f"sqlite+pysqlite:///{database_path}")
+    config.set_main_option("sqlalchemy.url", engine.url.render_as_string(hide_password=False).replace("%", "%%"))
     command.upgrade(config, "0002_human_only_field_constraints")
-    engine = create_engine(f"sqlite+pysqlite:///{database_path}")
     timestamp = datetime.now(UTC)
     with engine.begin() as connection:
         connection.execute(

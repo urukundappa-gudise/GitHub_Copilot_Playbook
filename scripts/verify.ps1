@@ -49,13 +49,17 @@ try {
 
     Push-Location $repoRoot
     $locationPushed = $true
-    Invoke-VerificationStep 'uv' @('run', '--locked', '--project', 'backend', 'pytest', '-q')
+    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot 'backend/.venv') -PathType Container)) {
+        throw 'Backend dependencies are missing. Restore the locked environment before verification.'
+    }
+    Invoke-VerificationStep 'uv' @('run', '--no-sync', '--locked', '--project', 'backend', 'python', '-c', 'import pytest, hypothesis, fastapi, sqlalchemy, alembic, psycopg, idna')
+    Invoke-VerificationStep 'uv' @('run', '--no-sync', '--locked', '--project', 'backend', 'pytest', '-q')
     Write-Host 'Running Vitest discovery.'
     Invoke-VerificationStep 'npm' @('run', 'test', '--prefix', 'frontend')
     Invoke-VerificationStep 'npm' @('run', 'lint', '--prefix', 'frontend')
     Invoke-VerificationStep 'npm' @('run', 'typecheck', '--prefix', 'frontend')
     Invoke-VerificationStep 'npm' @('run', 'build', '--prefix', 'frontend')
-    Invoke-VerificationStep 'uv' @('run', '--locked', '--project', 'backend', 'python', 'backend/scripts/run_golden_evaluation.py')
+    Invoke-VerificationStep 'uv' @('run', '--no-sync', '--locked', '--project', 'backend', 'python', 'backend/scripts/run_golden_evaluation.py')
 }
 catch {
     Write-Error $_

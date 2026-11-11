@@ -8,6 +8,7 @@ Create Date: 2026-11-04
 from __future__ import annotations
 
 from alembic import op
+import sqlalchemy as sa
 
 revision = "0002_human_only_field_constraints"
 down_revision = "0001_phase2_foundation"
@@ -16,6 +17,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name == "postgresql":
+        op.alter_column("alembic_version", "version_num", type_=sa.String(64))
     with op.batch_alter_table("canonical_field_definitions") as batch_op:
         batch_op.create_check_constraint(
             "ck_declaration_fields_not_ai_writable",

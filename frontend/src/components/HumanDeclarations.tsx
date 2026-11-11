@@ -39,6 +39,12 @@ export function HumanDeclarations({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const previousValues = useRef(initialValues);
+  const mounted = useRef(false);
+  const saving = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const dirty =
     accepted !== (initialValues.get(FIELD_KEYS.accepted) === 'true') ||
     signature !== (initialValues.get(FIELD_KEYS.signature) ?? '') ||
@@ -73,32 +79,45 @@ export function HumanDeclarations({
 
   async function saveDeclaration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (disabled || saving.current) return;
+    saving.current = true;
     setBusy(true);
     setError('');
     try {
-      const updates = await Promise.all([
+      const updates = await Promise.allSettled([
         saveHumanField(sessionId, FIELD_KEYS.accepted, accepted),
         saveHumanField(sessionId, FIELD_KEYS.signature, signature),
         saveHumanField(sessionId, FIELD_KEYS.date, date),
       ]);
-      updates.forEach(onSaved);
+      if (!mounted.current) return;
+      for (const result of updates) {
+        if (result.status === 'fulfilled') onSaved(result.value);
+      }
+      if (updates.some((result) => result.status === 'rejected')) {
+        setError('Your declaration could not be fully saved. Please try again.');
+      }
     } catch {
-      setError('Your declaration could not be saved. Please try again.');
+      if (mounted.current) setError('Your declaration could not be saved. Please try again.');
     } finally {
-      setBusy(false);
+      saving.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
 
   async function saveNotes(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (disabled || saving.current) return;
+    saving.current = true;
     setBusy(true);
     setError('');
     try {
-      onSaved(await saveHumanField(sessionId, FIELD_KEYS.notes, notes));
+      const update = await saveHumanField(sessionId, FIELD_KEYS.notes, notes);
+      if (mounted.current) onSaved(update);
     } catch {
-      setError('Your reviewer notes could not be saved. Please try again.');
+      if (mounted.current) setError('Your reviewer notes could not be saved. Please try again.');
     } finally {
-      setBusy(false);
+      saving.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
 

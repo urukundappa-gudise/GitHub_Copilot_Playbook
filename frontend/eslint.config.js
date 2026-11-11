@@ -50,6 +50,7 @@ export default [
       'src/tests/submission-outcomes.test.tsx',
       'src/tests/safety-notices.test.tsx',
       'src/tests/outcome-dialog.test.tsx',
+      'src/tests/outcome-resources.test.tsx',
     ],
     languageOptions: {
       parserOptions: {

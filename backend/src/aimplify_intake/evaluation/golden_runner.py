@@ -151,6 +151,12 @@ def validate_case_coverage(cases: list[dict[str, Any]], manifest: dict[str, Any]
             ]
         ):
             raise ValueError(f"Golden case {case['id']} has an invalid expected safety notice.")
+    required_emails = {
+        "user@example.com", "user@xn--fa-hia.de", "user@example.c",
+        "user@xn--.de", "user@xn--e28h.de",
+    }
+    if not required_emails.issubset({case.get("email") for case in cases}):
+        raise ValueError("Golden cases must exercise the canonical ASCII/IDNA2008 email policy.")
 
 
 def evaluate_case(case: dict[str, Any], expected: dict[str, Any]) -> None:
@@ -167,6 +173,8 @@ def evaluate_case(case: dict[str, Any], expected: dict[str, Any]) -> None:
         "date_of_submission": "not submitted",
         "reviewer_notes": "Human notes only",
     }
+    if "email" in case:
+        candidates["submitter_email"] = case["email"]
     app = create_app(
         database_url="sqlite+pysqlite:///:memory:",
         identity_verifier=lambda _cookie: {"subject": "golden-employee"},
@@ -206,7 +214,10 @@ def evaluate_case(case: dict[str, Any], expected: dict[str, Any]) -> None:
         if result.get("safety_notice") != expected.get("safety_notice"):
             raise AssertionError(f"Golden case {case['id']} returned an unexpected safety notice.")
         accepted_fields = {update["field_key"] for update in result["field_updates"]}
-        rejected_fields = {"idea_title", "problem_statement"} - accepted_fields
+        evaluated = {"idea_title", "problem_statement"}
+        if "email" in case:
+            evaluated.add("submitter_email")
+        rejected_fields = evaluated - accepted_fields
         if accepted_fields != set(expected["accepted_fields"]):
             raise AssertionError(f"Golden case {case['id']} accepted unexpected fields.")
         if rejected_fields != set(expected["rejected_fields"]):
@@ -248,4 +259,3 @@ def run_golden_evaluation(
         expected["safety_notice"] = case["expected_safety_notice"]
         evaluate_case(case, expected)
     return manifest, cases
-

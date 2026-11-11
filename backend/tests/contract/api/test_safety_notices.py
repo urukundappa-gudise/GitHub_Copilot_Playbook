@@ -66,4 +66,4 @@ def test_ordinary_validation_failure_does_not_create_a_safety_notice() -> None:
         ).json()
 
     assert result["field_updates"] == []
-    assert result.get("safety_notice") is None
+    assert result["safety_notice"] is None
