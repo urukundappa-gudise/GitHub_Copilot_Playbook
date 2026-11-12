@@ -1,5 +1,9 @@
 # AWS App Runner Demo Deployment
 
+For accounts unable to create new App Runner services, see the separate
+[ECS Express demo](../ecs-express/README.md). The current deployment workflow
+targets ECS Express; this document describes the retained App Runner stack.
+
 This deployment runs the React frontend and FastAPI backend in one public
 App Runner service. It is a cohort-evaluation demo, not a production intake
 service.
@@ -72,8 +76,8 @@ service.
    condition for that list action. Scaling configuration describe/delete calls
    and service updates/deletes are restricted by account, region, and the
    configured service-name ARN pattern.    Scaling configuration tag operations are limited to that same named scaling
-   configuration. `iam:PassRole` names only the App Runner ECR access role and
-   the App Runner build service principal.
+   configuration. `iam:PassRole` names only the App Runner ECR access role;
+   that role's trust policy names the App Runner build service principal.
    The service name must be 4-25 characters: the scaling configuration appends
    `-single`, and AWS limits its name to 32 characters. Use the same service
    name in both Terraform roots.

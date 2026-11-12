@@ -13,3 +13,15 @@ output "github_deployment_role_arn" {
 output "apprunner_ecr_access_role_arn" {
   value = aws_iam_role.apprunner_ecr_access.arn
 }
+
+output "ecs_subnet_ids" {
+  value = aws_subnet.ecs_public[*].id
+}
+
+output "ecs_execution_role_arn" {
+  value = try(aws_iam_role.ecs_execution[0].arn, null)
+}
+
+output "ecs_infrastructure_role_arn" {
+  value = try(aws_iam_role.ecs_infrastructure[0].arn, null)
+}

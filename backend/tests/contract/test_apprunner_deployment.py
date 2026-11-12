@@ -81,7 +81,11 @@ def test_bootstrap_trust_and_iam_permissions_are_narrowly_scoped() -> None:
     assert 'variable = "aws:RequestedRegion"' in bootstrap
     assert 'sid       = "PassOnlyAppRunnerECRAccessRole"' in bootstrap
     assert "resources = [aws_iam_role.apprunner_ecr_access.arn]" in bootstrap
-    assert "variable = \"iam:PassedToService\"" in bootstrap
+    pass_role = bootstrap.split('sid       = "PassOnlyAppRunnerECRAccessRole"', 1)[1].split(
+        "\n  }", 1
+    )[0]
+    assert 'actions   = ["iam:PassRole"]' in pass_role
+    assert "resources = [aws_iam_role.apprunner_ecr_access.arn]" in pass_role
     assert 'variable = "aws:SourceAccount"' in bootstrap
     assert 'variable = "aws:SourceArn"' in bootstrap
     assert "var.state_bucket_name}/${key}" in bootstrap

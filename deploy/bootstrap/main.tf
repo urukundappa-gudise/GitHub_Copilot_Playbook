@@ -14,6 +14,8 @@ locals {
     "${var.bootstrap_state_key}.tflock",
     var.apprunner_state_key,
     "${var.apprunner_state_key}.tflock",
+    var.ecs_state_key,
+    "${var.ecs_state_key}.tflock",
   ]
 }
 
@@ -209,11 +211,78 @@ data "aws_iam_policy_document" "github_permissions" {
     effect    = "Allow"
     actions   = ["iam:PassRole"]
     resources = [aws_iam_role.apprunner_ecr_access.arn]
+  }
 
-    condition {
-      test     = "StringEquals"
-      variable = "iam:PassedToService"
-      values   = ["build.apprunner.amazonaws.com"]
+  dynamic "statement" {
+    for_each = var.enable_ecs_express ? [1] : []
+    content {
+      sid    = "ManageNamedExpressService"
+      effect = "Allow"
+      actions = [
+        "ecs:CreateExpressGatewayService",
+        "ecs:DescribeExpressGatewayService",
+        "ecs:ListServiceDeployments",
+        "ecs:UpdateExpressGatewayService",
+        "ecs:ListTagsForResource",
+        "ecs:TagResource",
+        "ecs:UntagResource",
+      ]
+      resources = ["arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${var.ecs_cluster_name}/${var.apprunner_service_name}"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_ecs_express ? [1] : []
+    content {
+      sid       = "CreateExpressGateway"
+      effect    = "Allow"
+      actions   = ["ecs:CreateGateway", "ecs:AssociateGatewayWithCluster", "ecs:TagResource"]
+      resources = ["arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:gateway/*/*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_ecs_express ? [1] : []
+    content {
+      sid       = "RegisterExpressTaskDefinitions"
+      effect    = "Allow"
+      actions   = ["ecs:RegisterTaskDefinition", "ecs:TagResource"]
+      resources = ["arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/*:*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_ecs_express ? [1] : []
+    content {
+      sid       = "UseDedicatedExpressCluster"
+      effect    = "Allow"
+      actions   = ["ecs:CreateCluster", "ecs:TagResource"]
+      resources = ["arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/${var.ecs_cluster_name}"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_ecs_express ? [1] : []
+    content {
+      sid       = "ReadExpressSecurityGroups"
+      effect    = "Allow"
+      actions   = ["ec2:DescribeSecurityGroups"]
+      resources = ["*"]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestedRegion"
+        values   = [var.aws_region]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_ecs_express ? [1] : []
+    content {
+      sid       = "PassOnlyExpressRoles"
+      effect    = "Allow"
+      actions   = ["iam:PassRole"]
+      resources = [aws_iam_role.ecs_execution[0].arn, aws_iam_role.ecs_infrastructure[0].arn]
     }
   }
 

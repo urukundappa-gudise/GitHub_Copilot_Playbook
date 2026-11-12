@@ -1,4 +1,4 @@
-name: Deploy App Runner Demo
+name: Deploy ECS Express Demo
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: apprunner-${{ github.ref }}
+  group: ecs-express-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -62,7 +62,7 @@ jobs:
       - phase-a
     if: needs.phase-a.result == 'success' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     outputs:
       service_url: ${{ steps.health.outputs.service_url }}
     permissions:
@@ -71,7 +71,7 @@ jobs:
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-      TF_APP_RUNNER_STATE_KEY: ${{ vars.TF_APP_RUNNER_STATE_KEY }}
+      TF_ECS_STATE_KEY: ${{ vars.TF_ECS_STATE_KEY }}
     steps:
       - name: Check out authorized deployment ref
         uses: actions/checkout@v4
@@ -86,56 +86,60 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.10.5
+          terraform_wrapper: false
 
-      - name: Initialize App Runner Terraform state
-        working-directory: deploy/apprunner
+      - name: Initialize ECS Express Terraform state
+        working-directory: deploy/ecs-express
         run: |
           terraform init -input=false \
             -backend-config="bucket=${TF_STATE_BUCKET}" \
-            -backend-config="key=${TF_APP_RUNNER_STATE_KEY}" \
+            -backend-config="key=${TF_ECS_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}" \
-            -backend-config="use_lockfile=true"
+            -backend-config="use_lockfile=true" \
+            -lockfile=readonly
 
       - name: Create or update service from the pushed image
-        working-directory: deploy/apprunner
+        working-directory: deploy/ecs-express
         env:
           ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          SERVICE_NAME: ${{ vars.APP_RUNNER_SERVICE_NAME }}
-          ECR_ACCESS_ROLE_ARN: ${{ vars.APP_RUNNER_ECR_ACCESS_ROLE_ARN }}
+          SERVICE_NAME: ${{ vars.ECS_SERVICE_NAME }}
+          CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
+          INFRASTRUCTURE_ROLE_ARN: ${{ vars.ECS_INFRASTRUCTURE_ROLE_ARN }}
+          SUBNET_IDS: ${{ vars.ECS_SUBNET_IDS }}
           IMAGE_TAG: ${{ needs.phase-a.outputs.image_tag }}
           DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT || 'demo' }}
         run: |
+          set -euo pipefail
           terraform apply -input=false -auto-approve \
             -var="aws_region=${AWS_REGION}" \
             -var="ecr_repository_name=${ECR_REPOSITORY}" \
             -var="service_name=${SERVICE_NAME}" \
-            -var="ecr_access_role_arn=${ECR_ACCESS_ROLE_ARN}" \
+            -var="cluster_name=${CLUSTER_NAME}" \
+            -var="execution_role_arn=${EXECUTION_ROLE_ARN}" \
+            -var="infrastructure_role_arn=${INFRASTRUCTURE_ROLE_ARN}" \
+            -var="subnet_ids=${SUBNET_IDS}" \
             -var="image_tag=${IMAGE_TAG}" \
             -var="deployment_environment=${DEPLOYMENT_ENVIRONMENT}"
 
       - name: Wait for healthy service and report URL
         id: health
-        working-directory: deploy/apprunner
+        working-directory: deploy/ecs-express
         run: |
           set -euo pipefail
-          service_arn="$(terraform output -raw service_arn)"
-          service_url="$(terraform output -raw service_url)"
+          endpoint="$(terraform output -json ingress_paths | jq -er '[.[] | select(.access_type == "PUBLIC") | .endpoint] | if length == 1 then .[0] else error("Expected one public ingress endpoint") end')"
+          case "$endpoint" in
+            https://*) service_url="${endpoint%/}" ;;
+            *) service_url="https://${endpoint%/}" ;;
+          esac
           for attempt in $(seq 1 60); do
-            status="$(aws apprunner describe-service \
-              --service-arn "$service_arn" \
-              --query 'Service.Status' --output text)"
-            if [ "$status" = "OPERATION_FAILED" ] || [ "$status" = "STOPPED" ]; then
-              echo "App Runner deployment reached terminal status: $status" >&2
-              exit 1
-            fi
-            if [ "$status" = "RUNNING" ] \
-              && curl --silent --show-error --fail --max-time 10 "$service_url/health/live"; then
-              echo "App Runner is healthy at $service_url"
+            if curl --silent --show-error --fail --max-time 10 "$service_url/health/live"; then
+              echo "ECS Express is healthy at $service_url"
               echo "service_url=$service_url" >> "$GITHUB_OUTPUT"
-              echo "App Runner demo: $service_url" >> "$GITHUB_STEP_SUMMARY"
+              echo "ECS Express demo: $service_url" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             sleep 10
           done
-          echo "App Runner did not become healthy within 10 minutes: $service_url" >&2
+          echo "ECS Express did not become healthy within 10 minutes: $service_url" >&2
           exit 1
