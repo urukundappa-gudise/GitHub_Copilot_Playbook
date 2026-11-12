@@ -1,0 +1,141 @@
+name: Deploy App Runner Demo
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apprunner-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  phase-a:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image_tag: ${{ steps.publish.outputs.image_tag }}
+    steps:
+      - name: Check out authorized deployment ref
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push immutable commit image
+        id: publish
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          set -euo pipefail
+          image="${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          if aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=${GITHUB_SHA}" >/dev/null 2>&1; then
+            echo "Immutable image ${GITHUB_SHA} already exists; reusing it."
+          else
+            docker build --pull --tag "$image" .
+            docker push "$image"
+          fi
+          echo "image_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+  phase-b:
+    needs:
+      - phase-a
+    if: needs.phase-a.result == 'success' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      service_url: ${{ steps.health.outputs.service_url }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_APP_RUNNER_STATE_KEY: ${{ vars.TF_APP_RUNNER_STATE_KEY }}
+    steps:
+      - name: Check out authorized deployment ref
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+
+      - name: Initialize App Runner Terraform state
+        working-directory: deploy/apprunner
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_APP_RUNNER_STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="use_lockfile=true"
+
+      - name: Create or update service from the pushed image
+        working-directory: deploy/apprunner
+        env:
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          SERVICE_NAME: ${{ vars.APP_RUNNER_SERVICE_NAME }}
+          ECR_ACCESS_ROLE_ARN: ${{ vars.APP_RUNNER_ECR_ACCESS_ROLE_ARN }}
+          IMAGE_TAG: ${{ needs.phase-a.outputs.image_tag }}
+          DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT || 'demo' }}
+        run: |
+          terraform apply -input=false -auto-approve \
+            -var="aws_region=${AWS_REGION}" \
+            -var="ecr_repository_name=${ECR_REPOSITORY}" \
+            -var="service_name=${SERVICE_NAME}" \
+            -var="ecr_access_role_arn=${ECR_ACCESS_ROLE_ARN}" \
+            -var="image_tag=${IMAGE_TAG}" \
+            -var="deployment_environment=${DEPLOYMENT_ENVIRONMENT}"
+
+      - name: Wait for healthy service and report URL
+        id: health
+        working-directory: deploy/apprunner
+        run: |
+          set -euo pipefail
+          service_arn="$(terraform output -raw service_arn)"
+          service_url="$(terraform output -raw service_url)"
+          for attempt in $(seq 1 60); do
+            status="$(aws apprunner describe-service \
+              --service-arn "$service_arn" \
+              --query 'Service.Status' --output text)"
+            if [ "$status" = "OPERATION_FAILED" ] || [ "$status" = "STOPPED" ]; then
+              echo "App Runner deployment reached terminal status: $status" >&2
+              exit 1
+            fi
+            if [ "$status" = "RUNNING" ] \
+              && curl --silent --show-error --fail --max-time 10 "$service_url/health/live"; then
+              echo "App Runner is healthy at $service_url"
+              echo "service_url=$service_url" >> "$GITHUB_OUTPUT"
+              echo "App Runner demo: $service_url" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "App Runner did not become healthy within 10 minutes: $service_url" >&2
+          exit 1

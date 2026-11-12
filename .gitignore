@@ -37,3 +37,9 @@ Thumbs.db
 
 # Docker
 *.local
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan

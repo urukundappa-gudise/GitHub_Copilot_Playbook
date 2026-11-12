@@ -53,6 +53,70 @@ jobs:
       - name: Build frontend
         run: npm run build --prefix frontend
 
+  container-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build --tag aimplify-intake:ci .
+
+      - name: Smoke-test production container
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker run --detach --publish 8000:8000 aimplify-intake:ci)"
+          trap 'docker rm --force "$container_id" >/dev/null' EXIT
+          test "$(docker inspect --format '{{.Config.User}}' "$container_id")" = "app:app"
+          docker inspect --format '{{json .Config.ExposedPorts}}' "$container_id" | grep -q '"8000/tcp"'
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8000/health/live >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs "$container_id"
+              exit 1
+            fi
+            sleep 2
+          done
+          curl --silent --fail http://127.0.0.1:8000/ | grep -q '<div id="root">'
+          curl --silent --fail http://127.0.0.1:8000/health/live | grep -q '"status":"live"'
+          docker exec "$container_id" python -c \
+            "from pathlib import Path; import aimplify_intake; root=Path('/app'); assert (root/'frontend/dist/index.html').is_file(); forbidden=('.git', '.npm', '.cache', 'pip-cache', 'uv-cache', 'coverage', '.pytest_cache', '.terraform', 'node_modules', '__pycache__'); database_suffixes=('.db', '.db-wal', '.db-shm', '.db-journal', '.sqlite', '.sqlite-wal', '.sqlite-shm', '.sqlite-journal', '.sqlite3', '.sqlite3-wal', '.sqlite3-shm', '.sqlite3-journal'); credential_names=('.aws', '.npmrc', '.netrc', 'credentials', 'id_rsa', 'id_ed25519', '.dockerconfigjson'); assert not [p for p in root.rglob('*') if any(part in forbidden for part in p.parts) or p.name.startswith('.env') or p.name.endswith(database_suffixes) or p.name in credential_names]; print('backend, frontend, and runtime exclusions verified')"
+          api_status="$(curl --silent --output /tmp/api-response --write-out '%{http_code}' \
+            http://127.0.0.1:8000/api/v1/unknown)"
+          test "$api_status" = "404"
+          ! grep -qi '<html' /tmp/api-response
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+
+      - name: Check Terraform formatting
+        run: |
+          terraform fmt -check -recursive deploy/bootstrap
+          terraform fmt -check -recursive deploy/apprunner
+
+      - name: Validate bootstrap Terraform
+        working-directory: deploy/bootstrap
+        run: |
+          terraform init -backend=false -input=false -lockfile=readonly
+          terraform validate
+
+      - name: Validate App Runner Terraform
+        working-directory: deploy/apprunner
+        run: |
+          terraform init -backend=false -input=false -lockfile=readonly
+          terraform validate
+
   security:
     runs-on: ubuntu-latest
     permissions:
@@ -77,6 +141,8 @@ jobs:
     needs:
       - backend
       - frontend
+      - container-smoke
+      - terraform
       - security
     runs-on: ubuntu-latest
     steps:
