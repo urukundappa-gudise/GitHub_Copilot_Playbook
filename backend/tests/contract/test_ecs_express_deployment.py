@@ -33,6 +33,9 @@ def test_express_network_roles_and_deployment_permissions() -> None:
     assert "service-role/AmazonECSTaskExecutionRolePolicy" in bootstrap
     assert "service-role/AmazonECSInfrastructureRoleforExpressGatewayServices" in bootstrap
     assert '"ecs:DeleteExpressGatewayService"' not in permissions
+    assert '"ecs:DescribeServices"' in permissions
+    assert '"ecs:DescribeServiceDeployments"' in permissions
+    assert "service-deployment/${var.ecs_cluster_name}/${var.apprunner_service_name}/*" in permissions
     assert 'sid       = "PassOnlyExpressRoles"' in permissions
     assert "aws_iam_role.ecs_execution[0].arn, aws_iam_role.ecs_infrastructure[0].arn" in permissions
     assert "var.ecs_state_key" in permissions

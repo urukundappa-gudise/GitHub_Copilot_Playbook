@@ -221,6 +221,8 @@ data "aws_iam_policy_document" "github_permissions" {
       actions = [
         "ecs:CreateExpressGatewayService",
         "ecs:DescribeExpressGatewayService",
+        "ecs:DescribeServiceDeployments",
+        "ecs:DescribeServices",
         "ecs:ListServiceDeployments",
         "ecs:UpdateExpressGatewayService",
         "ecs:ListTagsForResource",
@@ -228,6 +230,16 @@ data "aws_iam_policy_document" "github_permissions" {
         "ecs:UntagResource",
       ]
       resources = ["arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${var.ecs_cluster_name}/${var.apprunner_service_name}"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_ecs_express ? [1] : []
+    content {
+      sid       = "ReadExpressServiceDeployments"
+      effect    = "Allow"
+      actions   = ["ecs:DescribeServiceDeployments"]
+      resources = ["arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service-deployment/${var.ecs_cluster_name}/${var.apprunner_service_name}/*"]
     }
   }
 
