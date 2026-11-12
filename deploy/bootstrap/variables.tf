@@ -95,3 +95,21 @@ variable "apprunner_state_key" {
   type        = string
   default     = "apprunner/service.tfstate"
 }
+
+variable "enable_ecs_express" {
+  description = "Create a dedicated VPC and IAM roles for the ECS Express demo."
+  type        = bool
+  default     = false
+}
+
+variable "ecs_cluster_name" {
+  description = "Dedicated ECS cluster for the Express demo."
+  type        = string
+  default     = "aimplify-intake-demo"
+}
+
+variable "ecs_state_key" {
+  description = "Exact S3 object key for ECS Express service Terraform state."
+  type        = string
+  default     = "ecs-express/service.tfstate"
+}

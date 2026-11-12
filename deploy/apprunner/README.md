@@ -1,5 +1,9 @@
 # AWS App Runner Demo Deployment
 
+For accounts unable to create new App Runner services, see the separate
+[ECS Express demo](../ecs-express/README.md). The current deployment workflow
+targets ECS Express; this document describes the retained App Runner stack.
+
 This deployment runs the React frontend and FastAPI backend in one public
 App Runner service. It is a cohort-evaluation demo, not a production intake
 service.
