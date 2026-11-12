@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fnmatch
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -73,7 +74,8 @@ def test_bootstrap_trust_and_iam_permissions_are_narrowly_scoped() -> None:
     for action in ("ListTagsForResource", "TagResource", "UntagResource"):
         assert f'"apprunner:{action}"' in scaling_permissions
     assert "resources = [local.apprunner_scaling_arn]" in scaling_permissions
-    assert "autoscalingconfiguration/${var.apprunner_service_name}-single-instance/*/*" in bootstrap
+    assert "autoscalingconfiguration/${var.apprunner_service_name}-single/*/*" in bootstrap
+    assert 'values   = ["${var.apprunner_service_name}-single"]' in bootstrap
     assert 'variable = "aws:RequestTag/Service"' in bootstrap
     assert 'variable = "aws:RequestTag/Name"' in bootstrap
     assert 'variable = "aws:RequestedRegion"' in bootstrap
@@ -93,6 +95,9 @@ def test_bootstrap_trust_and_iam_permissions_are_narrowly_scoped() -> None:
     assert 'is_publicly_accessible = true' in apprunner
     assert "max_size                        = 1" in apprunner
     assert 'port = "8000"' in apprunner
+    assert 'auto_scaling_configuration_name = "${var.service_name}-single"' in apprunner
+    for path in ("deploy/bootstrap/variables.tf", "deploy/apprunner/variables.tf"):
+        assert "^[A-Za-z0-9][A-Za-z0-9_-]{3,24}$" in _read(path)
 
 
 def test_oidc_trust_is_parameterized_for_the_exact_repository_and_ref() -> None:
@@ -105,3 +110,12 @@ def test_oidc_trust_is_parameterized_for_the_exact_repository_and_ref() -> None:
     assert 'values   = [local.github_oidc_subject]' in bootstrap
     assert 'can(regex("^[1-9][0-9]*$", var.github_identity_ids.owner_id))' in variables
     assert 'can(regex("^[1-9][0-9]*$", var.github_identity_ids.repository_id))' in variables
+
+
+def test_service_name_limit_keeps_scaling_name_within_aws_limit() -> None:
+    pattern = r"^[A-Za-z0-9][A-Za-z0-9_-]{3,24}$"
+    for service_name in ("abcd", "a" * 25, "aimplify-intake-demo"):
+        assert re.fullmatch(pattern, service_name)
+        assert len(f"{service_name}-single") <= 32
+    for service_name in ("abc", "a" * 26, "-invalid", "invalid/name"):
+        assert not re.fullmatch(pattern, service_name)

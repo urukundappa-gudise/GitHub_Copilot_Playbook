@@ -21,6 +21,11 @@ variable "service_name" {
   description = "AWS App Runner service name."
   type        = string
   default     = "aimplify-intake-demo"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9_-]{3,24}$", var.service_name))
+    error_message = "service_name must be 4-25 characters, start with a letter or digit, and contain only letters, digits, hyphens, or underscores."
+  }
 }
 
 variable "ecr_access_role_arn" {
