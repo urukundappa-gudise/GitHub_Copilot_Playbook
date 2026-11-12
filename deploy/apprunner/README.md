@@ -72,8 +72,8 @@ service.
    condition for that list action. Scaling configuration describe/delete calls
    and service updates/deletes are restricted by account, region, and the
    configured service-name ARN pattern.    Scaling configuration tag operations are limited to that same named scaling
-   configuration. `iam:PassRole` names only the App Runner ECR access role and
-   the App Runner build service principal.
+   configuration. `iam:PassRole` names only the App Runner ECR access role;
+   that role's trust policy names the App Runner build service principal.
    The service name must be 4-25 characters: the scaling configuration appends
    `-single`, and AWS limits its name to 32 characters. Use the same service
    name in both Terraform roots.

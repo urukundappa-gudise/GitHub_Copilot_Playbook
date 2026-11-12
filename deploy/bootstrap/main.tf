@@ -209,12 +209,6 @@ data "aws_iam_policy_document" "github_permissions" {
     effect    = "Allow"
     actions   = ["iam:PassRole"]
     resources = [aws_iam_role.apprunner_ecr_access.arn]
-
-    condition {
-      test     = "StringEquals"
-      variable = "iam:PassedToService"
-      values   = ["build.apprunner.amazonaws.com"]
-    }
   }
 
   statement {
