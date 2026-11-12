@@ -3,7 +3,7 @@ data "aws_partition" "current" {}
 
 locals {
   apprunner_service_arn = "arn:${data.aws_partition.current.partition}:apprunner:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${var.apprunner_service_name}/*"
-  apprunner_scaling_arn = "arn:${data.aws_partition.current.partition}:apprunner:${var.aws_region}:${data.aws_caller_identity.current.account_id}:autoscalingconfiguration/${var.apprunner_service_name}-single-instance/*"
+  apprunner_scaling_arn = "arn:${data.aws_partition.current.partition}:apprunner:${var.aws_region}:${data.aws_caller_identity.current.account_id}:autoscalingconfiguration/${var.apprunner_service_name}-single-instance/*/*"
   github_oidc_subject = var.github_identity_ids == null ? (
     "repo:${var.github_repository}:ref:${var.github_ref}"
     ) : (
@@ -197,6 +197,9 @@ data "aws_iam_policy_document" "github_permissions" {
     actions = [
       "apprunner:DeleteAutoScalingConfiguration",
       "apprunner:DescribeAutoScalingConfiguration",
+      "apprunner:ListTagsForResource",
+      "apprunner:TagResource",
+      "apprunner:UntagResource",
     ]
     resources = [local.apprunner_scaling_arn]
   }

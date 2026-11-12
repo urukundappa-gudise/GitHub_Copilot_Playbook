@@ -67,6 +67,13 @@ def test_bootstrap_trust_and_iam_permissions_are_narrowly_scoped() -> None:
     assert 'repo:${var.github_repository}:ref:${var.github_ref}' in bootstrap
     assert 'sid       = "CreateNamedAppRunnerService"' in bootstrap
     assert 'sid    = "ManageOnlyNamedAppRunnerService"' in bootstrap
+    scaling_permissions = bootstrap.split('sid    = "ManageScalingConfiguration"', 1)[1].split(
+        "\n  }", 1
+    )[0]
+    for action in ("ListTagsForResource", "TagResource", "UntagResource"):
+        assert f'"apprunner:{action}"' in scaling_permissions
+    assert "resources = [local.apprunner_scaling_arn]" in scaling_permissions
+    assert "autoscalingconfiguration/${var.apprunner_service_name}-single-instance/*/*" in bootstrap
     assert 'variable = "aws:RequestTag/Service"' in bootstrap
     assert 'variable = "aws:RequestTag/Name"' in bootstrap
     assert 'variable = "aws:RequestedRegion"' in bootstrap
