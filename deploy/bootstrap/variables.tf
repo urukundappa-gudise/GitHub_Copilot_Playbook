@@ -17,6 +17,23 @@ variable "github_repository" {
   }
 }
 
+variable "github_identity_ids" {
+  description = "GitHub owner and repository IDs for immutable OIDC subjects, or null for legacy name-only subjects."
+  type = object({
+    owner_id      = string
+    repository_id = string
+  })
+  default = null
+
+  validation {
+    condition = var.github_identity_ids == null ? true : (
+      can(regex("^[1-9][0-9]*$", var.github_identity_ids.owner_id)) &&
+      can(regex("^[1-9][0-9]*$", var.github_identity_ids.repository_id))
+    )
+    error_message = "github_identity_ids must contain positive numeric owner_id and repository_id values."
+  }
+}
+
 variable "github_ref" {
   description = "Exact Git ref authorized by the OIDC trust policy."
   type        = string

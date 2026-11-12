@@ -90,5 +90,11 @@ def test_bootstrap_trust_and_iam_permissions_are_narrowly_scoped() -> None:
 
 def test_oidc_trust_is_parameterized_for_the_exact_repository_and_ref() -> None:
     bootstrap = _read("deploy/bootstrap/main.tf")
+    variables = _read("deploy/bootstrap/variables.tf")
 
     assert 'repo:${var.github_repository}:ref:${var.github_ref}' in bootstrap
+    assert '${split("/", var.github_repository)[0]}@${var.github_identity_ids.owner_id}' in bootstrap
+    assert '${split("/", var.github_repository)[1]}@${var.github_identity_ids.repository_id}' in bootstrap
+    assert 'values   = [local.github_oidc_subject]' in bootstrap
+    assert 'can(regex("^[1-9][0-9]*$", var.github_identity_ids.owner_id))' in variables
+    assert 'can(regex("^[1-9][0-9]*$", var.github_identity_ids.repository_id))' in variables
