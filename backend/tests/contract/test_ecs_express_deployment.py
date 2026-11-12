@@ -13,8 +13,10 @@ def test_express_demo_configuration() -> None:
     assert 'health_check_path       = "/health/live"' in service
     assert 'cpu                     = "256"' in service
     assert 'memory                  = "512"' in service
-    assert "min_task_count = 1" in service
-    assert "max_task_count = 1" in service
+    assert "min_task_count            = 1" in service
+    assert "max_task_count            = 1" in service
+    assert 'auto_scaling_metric       = "AVERAGE_CPU"' in service
+    assert "auto_scaling_target_value = 60" in service
     assert 'name  = "AUTH_REQUIRED"' in service
     assert 'value = "false"' in service
     assert "DATABASE_URL" not in service
