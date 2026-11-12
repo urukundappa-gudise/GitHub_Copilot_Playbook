@@ -8,14 +8,16 @@ import json
 import os
 from collections.abc import Callable
 from io import BytesIO
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 from zipfile import BadZipFile
 
 from docx.opc.exceptions import PackageNotFoundError as DocxPackageNotFoundError
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pptx.exc import PackageNotFoundError as PptxPackageNotFoundError
 from pydantic import BaseModel, Field
 from PyPDF2.errors import PdfReadError
@@ -93,6 +95,7 @@ def create_app(
     max_upload_bytes: int = 20 * 1024 * 1024,
     websocket_idle_timeout_seconds: float = 60,
     allowed_origins: set[str] | None = None,
+    frontend_dist: Path | str | None = None,
 ) -> FastAPI:
     """Create an app; production identity verification is supplied by the OIDC integration."""
     app = FastAPI(title="AIMPLIFY Intake")
@@ -110,11 +113,15 @@ def create_app(
     app.state.transcription_no_retention_approved = transcription_no_retention_approved
     app.state.max_upload_bytes = int(os.getenv("MAX_UPLOAD_BYTES", str(max_upload_bytes)))
     app.state.websocket_idle_timeout_seconds = websocket_idle_timeout_seconds
-    app.state.allowed_origins = allowed_origins or {
+    configured_origins = set(allowed_origins) if allowed_origins is not None else {
         origin.strip()
         for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://testserver").split(",")
         if origin.strip()
     }
+    app_origin = os.getenv("APP_ORIGIN")
+    if app_origin:
+        configured_origins.add(app_origin)
+    app.state.allowed_origins = configured_origins
 
     def subject_for(cookie: str | None) -> str:
         if not cookie:
@@ -134,23 +141,43 @@ def create_app(
 
         return "employee-1"
 
-    def is_origin_allowed(origin: str | None) -> bool:
+    def is_origin_allowed(origin: str | None, request_host: str | None) -> bool:
         if not origin:
+            return False
+        try:
+            parsed = urlsplit(origin)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.netloc.endswith(":")
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+            ):
+                return False
+            _ = parsed.port
+        except ValueError:
             return False
         if origin in app.state.allowed_origins:
             return True
-        vercel_url = os.getenv("VERCEL_URL")
-        if vercel_url and origin in (f"https://{vercel_url}", f"http://{vercel_url}"):
-            return True
-        vercel_prod_url = os.getenv("VERCEL_PROJECT_PRODUCTION_URL")
-        if vercel_prod_url and origin in (f"https://{vercel_prod_url}", f"http://{vercel_prod_url}"):
-            return True
-        if origin.endswith(".vercel.app"):
-            return True
-        return False
+        hostname = parsed.hostname.lower()
+        if parsed.scheme == "https" and hostname.endswith(".awsapprunner.com"):
+            runner_labels = hostname.split(".")[:-2]
+            return bool(runner_labels) and all(
+                label
+                and label.isascii()
+                and len(label) <= 63
+                and label[0].isalnum()
+                and label[-1].isalnum()
+                and all(character.isalnum() or character == "-" for character in label)
+                for label in runner_labels
+            )
+        return bool(request_host and parsed.netloc.lower() == request_host.lower())
 
-    def require_allowed_origin(origin: str | None) -> None:
-        if not is_origin_allowed(origin):
+    def require_allowed_origin(origin: str | None, request_host: str | None) -> None:
+        if not is_origin_allowed(origin, request_host):
             raise HTTPException(status_code=403, detail="Forbidden.")
 
     def authorized_submission(session_id: str, subject: str) -> IdeaSubmission:
@@ -245,7 +272,7 @@ def create_app(
 
     @app.post("/api/v1/sessions", status_code=201)
     async def create_session(request: Request, response: Response) -> dict[str, str]:
-        require_allowed_origin(request.headers.get("origin"))
+        require_allowed_origin(request.headers.get("origin"), request.headers.get("host"))
         cookie = request.cookies.get("oidc_session")
         if not cookie:
             if app.state.identity_verifier is not None or os.getenv("AUTH_REQUIRED", "false").lower() in ("true", "1"):
@@ -281,7 +308,7 @@ def create_app(
 
     @app.post("/api/v1/sessions/{session_id}/messages")
     async def send_message(session_id: str, body: MessageBody, request: Request) -> Any:
-        require_allowed_origin(request.headers.get("origin"))
+        require_allowed_origin(request.headers.get("origin"), request.headers.get("host"))
         subject = subject_for(request.cookies.get("oidc_session"))
         authorized_submission(session_id, subject)
         request_id = body.request_id or uuid4().hex
@@ -289,7 +316,7 @@ def create_app(
 
     @app.post("/api/v1/sessions/{session_id}/sources/{media_type}")
     async def upload_source(session_id: str, media_type: str, request: Request) -> Any:
-        require_allowed_origin(request.headers.get("origin"))
+        require_allowed_origin(request.headers.get("origin"), request.headers.get("host"))
         subject = subject_for(request.cookies.get("oidc_session"))
         authorized_submission(session_id, subject)
         if media_type not in SOURCE_TYPES:
@@ -322,7 +349,7 @@ def create_app(
     @app.websocket("/api/v1/sessions/{session_id}/stream")
     async def intake_stream(websocket: WebSocket, session_id: str) -> None:
         origin = websocket.headers.get("origin", "")
-        if not is_origin_allowed(origin):
+        if not is_origin_allowed(origin, websocket.headers.get("host")):
             await websocket.close(code=4403)
             return
         try:
@@ -444,6 +471,34 @@ def create_app(
         finally:
             if active_source is not None:
                 active_source["buffer"].close()
+
+    resolved_frontend_dist = Path(frontend_dist) if frontend_dist is not None else Path(
+        os.getenv("FRONTEND_DIST", Path(__file__).resolve().parents[4] / "frontend" / "dist")
+    )
+    index_file = resolved_frontend_dist / "index.html"
+    if index_file.is_file():
+
+        @app.get("/", include_in_schema=False)
+        async def frontend_index() -> FileResponse:
+            return FileResponse(index_file, media_type="text/html")
+
+        @app.get("/{frontend_path:path}", include_in_schema=False)
+        async def frontend_files(frontend_path: str) -> FileResponse:
+            if frontend_path == "health" or frontend_path.startswith("health/"):
+                raise HTTPException(status_code=404, detail="Not found.")
+            if frontend_path == "api" or frontend_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="Not found.")
+
+            candidate = (resolved_frontend_dist / frontend_path).resolve()
+            try:
+                candidate.relative_to(resolved_frontend_dist.resolve())
+            except ValueError:
+                raise HTTPException(status_code=404, detail="Not found.") from None
+            if candidate.is_file():
+                return FileResponse(candidate)
+            if Path(frontend_path).suffix or frontend_path.startswith("assets/"):
+                raise HTTPException(status_code=404, detail="Not found.")
+            return FileResponse(index_file, media_type="text/html")
 
     return app
 

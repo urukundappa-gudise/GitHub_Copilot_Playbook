@@ -1,0 +1,75 @@
+variable "aws_region" {
+  description = "AWS region for ECR and App Runner."
+  type        = string
+}
+
+variable "github_oidc_provider_arn" {
+  description = "ARN of the account's token.actions.githubusercontent.com OIDC provider."
+  type        = string
+}
+
+variable "github_repository" {
+  description = "GitHub owner/repository allowed to deploy."
+  type        = string
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "github_repository must be in owner/repository format."
+  }
+}
+
+variable "github_ref" {
+  description = "Exact Git ref authorized by the OIDC trust policy."
+  type        = string
+  default     = "refs/heads/main"
+  validation {
+    condition     = startswith(var.github_ref, "refs/heads/") || startswith(var.github_ref, "refs/tags/")
+    error_message = "github_ref must be a fully qualified branch or tag ref."
+  }
+}
+
+variable "deployment_environment" {
+  description = "Environment label attached to deployment resources."
+  type        = string
+  default     = "demo"
+}
+
+variable "ecr_repository_name" {
+  description = "Name of the immutable ECR image repository."
+  type        = string
+  default     = "aimplify-intake"
+}
+
+variable "apprunner_service_name" {
+  description = "Exact App Runner service name the deployment role may manage."
+  type        = string
+  default     = "aimplify-intake-demo"
+}
+
+variable "deployment_role_name" {
+  description = "Name of the GitHub Actions deployment role."
+  type        = string
+  default     = "aimplify-github-deploy"
+}
+
+variable "ecr_access_role_name" {
+  description = "Name of the App Runner ECR image-pull role."
+  type        = string
+  default     = "aimplify-apprunner-ecr-access"
+}
+
+variable "state_bucket_name" {
+  description = "Pre-provisioned S3 bucket containing Terraform state."
+  type        = string
+}
+
+variable "bootstrap_state_key" {
+  description = "Exact S3 object key for bootstrap Terraform state."
+  type        = string
+  default     = "apprunner/bootstrap.tfstate"
+}
+
+variable "apprunner_state_key" {
+  description = "Exact S3 object key for App Runner service Terraform state."
+  type        = string
+  default     = "apprunner/service.tfstate"
+}
