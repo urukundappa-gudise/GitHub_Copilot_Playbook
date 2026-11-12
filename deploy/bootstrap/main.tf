@@ -4,6 +4,11 @@ data "aws_partition" "current" {}
 locals {
   apprunner_service_arn = "arn:${data.aws_partition.current.partition}:apprunner:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${var.apprunner_service_name}/*"
   apprunner_scaling_arn = "arn:${data.aws_partition.current.partition}:apprunner:${var.aws_region}:${data.aws_caller_identity.current.account_id}:autoscalingconfiguration/${var.apprunner_service_name}-single-instance/*"
+  github_oidc_subject = var.github_identity_ids == null ? (
+    "repo:${var.github_repository}:ref:${var.github_ref}"
+    ) : (
+    "repo:${split("/", var.github_repository)[0]}@${var.github_identity_ids.owner_id}/${split("/", var.github_repository)[1]}@${var.github_identity_ids.repository_id}:ref:${var.github_ref}"
+  )
   terraform_state_objects = [
     var.bootstrap_state_key,
     "${var.bootstrap_state_key}.tflock",
@@ -51,7 +56,7 @@ data "aws_iam_policy_document" "github_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:${var.github_ref}"]
+      values   = [local.github_oidc_subject]
     }
   }
 }

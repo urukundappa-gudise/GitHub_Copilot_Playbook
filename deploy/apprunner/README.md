@@ -48,10 +48,16 @@ service.
      -var="aws_region=<aws-region>" `
      -var="github_oidc_provider_arn=<oidc-provider-arn>" `
      -var="github_repository=<owner/repository>" `
+     -var='github_identity_ids={owner_id="<owner-id>",repository_id="<repository-id>"}' `
      -var="github_ref=refs/heads/main" `
      -var="deployment_environment=demo" `
      -var="state_bucket_name=<state-bucket>"
    ```
+
+   Supply the numeric GitHub owner and repository IDs when the repository's
+   OIDC subject uses immutable IDs. If it uses the legacy name-only subject,
+   omit `github_identity_ids`. The selected subject must exactly match the
+   token issued for the repository and ref; do not use wildcards.
 
    Keep the default, distinct state keys unless you also update the IAM state
    policy and workflow variables. The create-service IAM action requires
@@ -82,7 +88,8 @@ service.
    | `DEPLOYMENT_ENVIRONMENT` | `demo` (or the chosen resource tag value) |
 
    The AWS role trust accepts only audience `sts.amazonaws.com` and the exact
-   `repo:<owner>/<repository>:ref:refs/heads/main` subject. The workflow is
+   `repo:<owner>@<owner-id>/<repository>@<repository-id>:ref:refs/heads/main`
+   immutable subject (or the name-only subject when IDs are omitted). The workflow is
    restricted to `main` for both push and manual dispatch. The bootstrap and
    workflow ref values must match. Do not broaden the trust to all branches,
    tags, or repositories.
