@@ -2,7 +2,7 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 resource "aws_apprunner_auto_scaling_configuration_version" "demo" {
-  auto_scaling_configuration_name = "${var.service_name}-single-instance"
+  auto_scaling_configuration_name = "${var.service_name}-single"
   max_concurrency                 = 100
   max_size                        = 1
   min_size                        = 1
@@ -10,7 +10,7 @@ resource "aws_apprunner_auto_scaling_configuration_version" "demo" {
   tags = {
     Environment = var.deployment_environment
     ManagedBy   = "terraform"
-    Name        = "${var.service_name}-single-instance"
+    Name        = "${var.service_name}-single"
     Service     = var.service_name
   }
 

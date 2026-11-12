@@ -60,6 +60,11 @@ variable "apprunner_service_name" {
   description = "Exact App Runner service name the deployment role may manage."
   type        = string
   default     = "aimplify-intake-demo"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9_-]{3,24}$", var.apprunner_service_name))
+    error_message = "apprunner_service_name must be 4-25 characters, start with a letter or digit, and contain only letters, digits, hyphens, or underscores."
+  }
 }
 
 variable "deployment_role_name" {

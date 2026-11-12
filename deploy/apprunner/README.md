@@ -71,8 +71,12 @@ service.
    requested region because the API does not expose a service-name resource
    condition for that list action. Scaling configuration describe/delete calls
    and service updates/deletes are restricted by account, region, and the
-   configured service-name ARN pattern. `iam:PassRole` names only the App Runner
-   ECR access role and the App Runner build service principal.
+   configured service-name ARN pattern.    Scaling configuration tag operations are limited to that same named scaling
+   configuration. `iam:PassRole` names only the App Runner ECR access role and
+   the App Runner build service principal.
+   The service name must be 4-25 characters: the scaling configuration appends
+   `-single`, and AWS limits its name to 32 characters. Use the same service
+   name in both Terraform roots.
 4. Record the bootstrap outputs and configure these **GitHub repository
    variables** (not AWS access-key secrets):
 
