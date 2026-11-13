@@ -108,6 +108,12 @@ variable "azure_ad_client_secret_arn" {
   default     = null
 }
 
+variable "database_url_secret_arn" {
+  description = "Operator-managed database URL secret ARN for ECS Express."
+  type        = string
+  default     = null
+}
+
 variable "ecs_cluster_name" {
   description = "Dedicated ECS cluster for the Express demo."
   type        = string

@@ -79,11 +79,11 @@ def test_bootstrap_trust_and_iam_permissions_are_narrowly_scoped() -> None:
     assert 'variable = "aws:RequestTag/Service"' in bootstrap
     assert 'variable = "aws:RequestTag/Name"' in bootstrap
     assert 'variable = "aws:RequestedRegion"' in bootstrap
-    assert 'sid       = "PassOnlyAppRunnerECRAndInstanceRoles"' in bootstrap
-    pass_role = bootstrap.split('sid       = "PassOnlyAppRunnerECRAndInstanceRoles"', 1)[1].split(
+    assert re.search(r'sid\s*=\s*"PassOnlyAppRunnerECRAndInstanceRoles"', bootstrap)
+    pass_role = bootstrap.split('"PassOnlyAppRunnerECRAndInstanceRoles"', 1)[1].split(
         "\n  }", 1
     )[0]
-    assert 'actions   = ["iam:PassRole"]' in pass_role
+    assert re.search(r'actions\s*=\s*\["iam:PassRole"\]', pass_role)
     assert "aws_iam_role.apprunner_ecr_access.arn" in pass_role
     assert "aws_iam_role.apprunner_instance.arn" in pass_role
     assert 'variable = "aws:SourceAccount"' in bootstrap

@@ -156,9 +156,10 @@ def create_app(
     app.state.transcription_no_retention_approved = transcription_no_retention_approved
     app.state.max_upload_bytes = int(os.getenv("MAX_UPLOAD_BYTES", str(max_upload_bytes)))
     app.state.websocket_idle_timeout_seconds = websocket_idle_timeout_seconds
+    default_origins = "" if settings.auth_required else "http://localhost:5173,http://testserver"
     configured_origins = set(allowed_origins) if allowed_origins is not None else {
         origin.strip()
-        for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://testserver").split(",")
+        for origin in os.getenv("ALLOWED_ORIGINS", default_origins).split(",")
         if origin.strip()
     }
     app_origin = os.getenv("APP_ORIGIN")
@@ -206,7 +207,11 @@ def create_app(
         if origin in app.state.allowed_origins:
             return True
         hostname = parsed.hostname.lower()
-        if parsed.scheme == "https" and hostname.endswith(".awsapprunner.com"):
+        if (
+            not settings.auth_required
+            and parsed.scheme == "https"
+            and hostname.endswith(".awsapprunner.com")
+        ):
             runner_labels = hostname.split(".")[:-2]
             return bool(runner_labels) and all(
                 label
@@ -217,7 +222,11 @@ def create_app(
                 and all(character.isalnum() or character == "-" for character in label)
                 for label in runner_labels
             )
-        return bool(request_host and parsed.netloc.lower() == request_host.lower())
+        return bool(
+            not settings.auth_required
+            and request_host
+            and parsed.netloc.lower() == request_host.lower()
+        )
 
     def require_allowed_origin(origin: str | None, request_host: str | None) -> None:
         if not is_origin_allowed(origin, request_host):

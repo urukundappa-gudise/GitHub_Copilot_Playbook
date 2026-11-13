@@ -207,9 +207,9 @@ data "aws_iam_policy_document" "github_permissions" {
   }
 
   statement {
-    sid       = "PassOnlyAppRunnerECRAndInstanceRoles"
-    effect    = "Allow"
-    actions   = ["iam:PassRole"]
+    sid     = "PassOnlyAppRunnerECRAndInstanceRoles"
+    effect  = "Allow"
+    actions = ["iam:PassRole"]
     resources = [
       aws_iam_role.apprunner_ecr_access.arn,
       aws_iam_role.apprunner_instance.arn,

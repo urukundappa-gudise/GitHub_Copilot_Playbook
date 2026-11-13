@@ -50,6 +50,12 @@ variable "apprunner_instance_role_arn" {
   default     = null
 }
 
+variable "app_origin" {
+  description = "Approved HTTPS application origin without a trailing slash."
+  type        = string
+  default     = ""
+}
+
 variable "azure_ad_client_secret_arn" {
   description = "Operator-managed Entra client secret ARN; never provide the secret value."
   type        = string
