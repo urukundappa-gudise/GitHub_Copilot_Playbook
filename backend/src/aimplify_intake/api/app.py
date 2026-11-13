@@ -6,7 +6,9 @@ import asyncio
 import hashlib
 import json
 import os
+import secrets
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -14,33 +16,50 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 from zipfile import BadZipFile
 
+import httpx
+from authlib.integrations.base_client.errors import AuthlibBaseError
 from docx.opc.exceptions import PackageNotFoundError as DocxPackageNotFoundError
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pptx.exc import PackageNotFoundError as PptxPackageNotFoundError
 from pydantic import BaseModel, Field
 from PyPDF2.errors import PdfReadError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 
+from aimplify_intake.api.auth import (
+    AuthConfigurationError,
+    AuthSettings,
+    EntraOidcProvider,
+    OidcProviderError,
+    load_auth_settings,
+)
 from aimplify_intake.api.http import create_human_fields_router
 from aimplify_intake.graph.intake_graph import create_intake_graph
 from aimplify_intake.ingestion.audio import TranscriptionProvider, transcribe_audio
 from aimplify_intake.ingestion.buffers import read_request_stream_to_memory
 from aimplify_intake.ingestion.documents import extract_docx, extract_pdf, extract_pptx
+from aimplify_intake.observability.logging import configure_uvicorn_access_log_redaction
 from aimplify_intake.persistence.models import FieldValue, IdeaSubmission
 from aimplify_intake.persistence.repositories import (
+    consume_oidc_transaction,
     create_database,
+    create_oidc_session,
+    create_oidc_transaction,
     create_submission,
     get_authorized_submission,
     persist_ai_values,
+    purge_expired_oidc_transactions,
     read_field_state,
+    revoke_oidc_session,
 )
 from aimplify_intake.schema.registry import load_canonical_schema
 from aimplify_intake.services.extraction import CandidateExtractor, extract_safe_candidates
 
 IdentityVerifier = Callable[[str], dict[str, Any]]
+IdentityVerifierFactory = Callable[[sessionmaker[Any]], IdentityVerifier]
 SOURCE_TYPES = {
     "pdf": ("application/pdf", "application/octet-stream"),
     "docx": (
@@ -89,6 +108,7 @@ def create_app(
     *,
     database_url: str | None = None,
     identity_verifier: IdentityVerifier | None = None,
+    identity_verifier_factory: IdentityVerifierFactory | None = None,
     candidate_extractor: CandidateExtractor | None = None,
     transcription_provider: TranscriptionProvider | None = None,
     transcription_no_retention_approved: bool = False,
@@ -96,15 +116,38 @@ def create_app(
     websocket_idle_timeout_seconds: float = 60,
     allowed_origins: set[str] | None = None,
     frontend_dist: Path | str | None = None,
+    auth_settings: AuthSettings | None = None,
+    oidc_provider: Any | None = None,
 ) -> FastAPI:
     """Create an app; production identity verification is supplied by the OIDC integration."""
+    configure_uvicorn_access_log_redaction()
+    settings = auth_settings or load_auth_settings()
+    if identity_verifier is not None and identity_verifier_factory is not None:
+        raise ValueError("Provide either an identity verifier or its factory, not both.")
     app = FastAPI(title="AIMPLIFY Intake")
     engine, session_factory = create_database(
         database_url or os.getenv("DATABASE_URL", "sqlite+pysqlite:///:memory:")
     )
     app.state.engine = engine
     app.state.session_factory = session_factory
-    app.state.identity_verifier = identity_verifier
+    app.state.identity_verifier = (
+        identity_verifier_factory(session_factory)
+        if identity_verifier_factory is not None
+        else identity_verifier
+    )
+    app.state.auth_settings = settings
+    provider_ready = all(
+        (
+            settings.tenant_id,
+            settings.client_id,
+            settings.client_secret,
+            settings.redirect_uri,
+            settings.post_logout_redirect_uri,
+        )
+    )
+    app.state.oidc_provider = oidc_provider or (
+        EntraOidcProvider(settings) if provider_ready else None
+    )
     app.state.candidate_extractor = candidate_extractor
     app.state.intake_graph = create_intake_graph(
         lambda text: extract_safe_candidates(text, app.state.candidate_extractor)
@@ -136,7 +179,7 @@ def create_app(
                 raise HTTPException(status_code=401, detail="Unauthenticated.")
             return subject
 
-        if os.getenv("AUTH_REQUIRED", "false").lower() in ("true", "1"):
+        if settings.auth_required:
             raise HTTPException(status_code=401, detail="Unauthenticated.")
 
         return "employee-1"
@@ -270,12 +313,211 @@ def create_app(
             )
         return {"status": "ready"}
 
+    @app.get("/api/v1/auth/login")
+    async def auth_login() -> Response:
+        if settings.mock_mode:
+            raw_token = secrets.token_urlsafe(32)
+            with session_factory() as session:
+                create_oidc_session(
+                    session,
+                    raw_token,
+                    {
+                        "oid": "local-test-employee",
+                        "upn": "employee@example.test",
+                        "email": None,
+                        "name": "Test Employee",
+                    },
+                )
+            response = RedirectResponse("/", status_code=303)
+            response.set_cookie(
+                key="oidc_session",
+                value=raw_token,
+                httponly=True,
+                secure=True,
+                samesite="lax",
+                path="/",
+                max_age=8 * 60 * 60,
+            )
+            return response
+
+        provider = app.state.oidc_provider
+        if provider is None:
+            return _generic_error(
+                "AUTHENTICATION_UNAVAILABLE",
+                "Sign-in is unavailable.",
+                503,
+            )
+
+        now = datetime.now(UTC)
+        with session_factory() as session:
+            purge_expired_oidc_transactions(session, now=now)
+        state = secrets.token_urlsafe(32)
+        nonce = secrets.token_urlsafe(32)
+        pkce_verifier = secrets.token_urlsafe(64)
+        with session_factory() as session:
+            create_oidc_transaction(
+                session,
+                state=state,
+                nonce=nonce,
+                pkce_verifier=pkce_verifier,
+                now=now,
+            )
+        try:
+            authorization_url = await provider.authorization_url(
+                state=state,
+                nonce=nonce,
+                pkce_verifier=pkce_verifier,
+            )
+        except (AuthConfigurationError, OidcProviderError, httpx.HTTPError):
+            return _generic_error(
+                "AUTHENTICATION_UNAVAILABLE",
+                "Sign-in is unavailable.",
+                503,
+            )
+        return RedirectResponse(authorization_url, status_code=302)
+
+    @app.get("/api/v1/auth/callback")
+    async def auth_callback(
+        code: str | None = None,
+        state: str | None = None,
+        error: str | None = None,
+    ) -> Response:
+        if not state:
+            return _generic_error(
+                "AUTHENTICATION_FAILED", "Sign-in could not be completed.", 401
+            )
+        with session_factory() as session:
+            transaction = consume_oidc_transaction(session, state)
+        if transaction is None:
+            return _generic_error(
+                "AUTHENTICATION_FAILED", "Sign-in could not be completed.", 401
+            )
+        if error or not code:
+            return RedirectResponse("/?auth=error", status_code=303)
+        provider = app.state.oidc_provider
+        if provider is None:
+            return _generic_error(
+                "AUTHENTICATION_UNAVAILABLE",
+                "Sign-in is unavailable.",
+                503,
+            )
+        try:
+            identity = await provider.validate_authorization_code(
+                code=code,
+                nonce=transaction.nonce,
+                pkce_verifier=transaction.pkce_verifier,
+            )
+        except (
+            AuthlibBaseError,
+            AuthConfigurationError,
+            OidcProviderError,
+            httpx.HTTPError,
+            ValueError,
+        ):
+            return RedirectResponse("/?auth=error", status_code=303)
+        raw_token = secrets.token_urlsafe(32)
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(hours=8)
+        with session_factory() as session:
+            create_oidc_session(
+                session,
+                raw_token,
+                identity,
+                now=now,
+                expires_at=expires_at,
+            )
+        response = RedirectResponse("/", status_code=303)
+        response.set_cookie(
+            key="oidc_session",
+            value=raw_token,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+            max_age=8 * 60 * 60,
+            expires=expires_at,
+        )
+        return response
+
+    @app.get("/api/v1/auth/session")
+    async def auth_session(request: Request) -> Response:
+        token = request.cookies.get("oidc_session")
+        verifier = app.state.identity_verifier
+        if not token or verifier is None:
+            response = _generic_error(
+                "UNAUTHENTICATED",
+                "Authentication is required.",
+                401,
+            )
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Authentication-Required"] = str(settings.auth_required).lower()
+            return response
+        try:
+            identity = verifier(token)
+        except (ValueError, KeyError, TypeError):
+            identity = None
+        if not isinstance(identity, dict) or not all(
+            isinstance(identity.get(key), str) and identity.get(key)
+            for key in ("oid", "upn", "name")
+        ):
+            response = _generic_error(
+                "UNAUTHENTICATED",
+                "Authentication is required.",
+                401,
+            )
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Authentication-Required"] = str(settings.auth_required).lower()
+            return response
+        email = identity.get("email")
+        if email is not None and not isinstance(email, str):
+            email = None
+        response = JSONResponse(
+            {
+                "authenticated": True,
+                "user": {
+                    "oid": identity["oid"],
+                    "upn": identity["upn"],
+                    "email": email,
+                    "name": identity["name"],
+                },
+            },
+            headers={
+                "Cache-Control": "no-store",
+                "X-Authentication-Required": str(settings.auth_required).lower(),
+            },
+        )
+        return response
+
+    @app.post("/api/v1/auth/logout")
+    async def auth_logout(request: Request) -> Response:
+        require_allowed_origin(request.headers.get("origin"), request.headers.get("host"))
+        raw_token = request.cookies.get("oidc_session")
+        if raw_token:
+            with session_factory() as session:
+                revoke_oidc_session(session, raw_token)
+        provider = app.state.oidc_provider
+        redirect_url = "/"
+        if provider is not None:
+            try:
+                redirect_url = await provider.logout_url()
+            except (AuthConfigurationError, OidcProviderError, httpx.HTTPError):
+                redirect_url = "/?auth=error"
+        response = RedirectResponse(redirect_url, status_code=303)
+        response.delete_cookie(
+            key="oidc_session",
+            path="/",
+            httponly=True,
+            secure=True,
+            samesite="lax",
+        )
+        return response
+
     @app.post("/api/v1/sessions", status_code=201)
     async def create_session(request: Request, response: Response) -> dict[str, str]:
         require_allowed_origin(request.headers.get("origin"), request.headers.get("host"))
         cookie = request.cookies.get("oidc_session")
         if not cookie:
-            if app.state.identity_verifier is not None or os.getenv("AUTH_REQUIRED", "false").lower() in ("true", "1"):
+            if app.state.identity_verifier is not None or settings.auth_required:
                 raise HTTPException(status_code=401, detail="Unauthenticated.")
             demo_token = f"demo-session-{uuid4().hex}"
             is_secure = request.url.is_secure or request.headers.get("x-forwarded-proto") == "https"
@@ -371,6 +613,15 @@ def create_app(
                     await websocket.send_json({"type": "server.error", "request_id": uuid4().hex, "payload": {"code": "REQUEST_TIMEOUT", "message": "The request could not be completed."}})
                     break
                 if message.get("type") == "websocket.disconnect":
+                    break
+                try:
+                    current_subject = subject_for(websocket.cookies.get("oidc_session"))
+                    authorized_submission(session_id, current_subject)
+                except HTTPException as error:
+                    await websocket.close(code=4401 if error.status_code == 401 else 4404)
+                    break
+                if current_subject != subject:
+                    await websocket.close(code=4401)
                     break
                 if message.get("bytes") is not None:
                     if active_source is None:

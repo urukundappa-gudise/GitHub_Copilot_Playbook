@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 import aimplify_intake.api.app as app_module
 from aimplify_intake.api.app import create_app
+from aimplify_intake.api.auth import AuthSettings
 from aimplify_intake.schema.registry import load_canonical_schema
 
 REQUIRED_NOFACTS = {"number", "date", "cost", "percentage", "word_quantity"}
@@ -78,6 +79,13 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         raise ValueError("Manifest must require single-question pacing coverage.")
     if not required_coverage.get("human_only_protection", False):
         raise ValueError("Manifest must require human-only protection coverage.")
+    if set(required_coverage.get("auth_access_outcomes", [])) != {
+        "authenticated",
+        "unauthenticated",
+    }:
+        raise ValueError(
+            "Manifest must require authenticated and unauthenticated access coverage."
+        )
 
 
 def validate_case_coverage(cases: list[dict[str, Any]], manifest: dict[str, Any]) -> None:
@@ -104,6 +112,11 @@ def validate_case_coverage(cases: list[dict[str, Any]], manifest: dict[str, Any]
         for profile in profiles
         for field in expected_outcomes[profile].get("human_only_fields", [])
     }
+    auth_access_coverage = {
+        case.get("auth_access")
+        for case in cases
+        if case.get("auth_access") is not None
+    }
 
     if not REQUIRED_SECTIONS.issubset(section_coverage):
         raise ValueError("Golden cases are missing canonical section coverage.")
@@ -113,6 +126,8 @@ def validate_case_coverage(cases: list[dict[str, Any]], manifest: dict[str, Any]
         raise ValueError("Golden cases are missing modality coverage.")
     if not REQUIRED_HUMAN_ONLY_FIELDS.issubset(human_only_coverage):
         raise ValueError("Golden cases are missing human-only field coverage.")
+    if not {"authenticated", "unauthenticated"}.issubset(auth_access_coverage):
+        raise ValueError("Golden cases are missing authentication access coverage.")
 
     if not any(
         expected_outcomes[profile].get("clarification_count") == 1 for profile in profiles
@@ -135,6 +150,8 @@ def validate_case_coverage(cases: list[dict[str, Any]], manifest: dict[str, Any]
             raise ValueError(f"Golden case {case['id']} must define a claim and expected outcome.")
         if len(case.get("no_facts_categories", [])) != 1:
             raise ValueError(f"Golden case {case['id']} must target one NoFacts category.")
+        if case.get("auth_access") not in {None, "authenticated", "unauthenticated"}:
+            raise ValueError(f"Golden case {case['id']} has an unsupported auth access outcome.")
 
 
 def evaluate_case(case: dict[str, Any], expected: dict[str, Any]) -> None:
@@ -215,6 +232,51 @@ def evaluate_case(case: dict[str, Any], expected: dict[str, Any]) -> None:
             raise AssertionError(f"Golden case {case['id']} persisted an AI human-only field.")
 
 
+def evaluate_auth_access(case: dict[str, Any]) -> None:
+    outcome = case.get("auth_access")
+    if outcome is None:
+        return
+    settings = AuthSettings(
+        tenant_id=None,
+        client_id=None,
+        client_secret=None,
+        redirect_uri=None,
+        post_logout_redirect_uri=None,
+        auth_required=True,
+        app_env="test",
+        mock_mode=False,
+    )
+
+    def verify(cookie: str) -> dict[str, str]:
+        if cookie != "golden-authenticated":
+            raise ValueError("Unauthenticated.")
+        return {"subject": "golden-employee"}
+
+    app = create_app(
+        database_url="sqlite+pysqlite:///:memory:",
+        allowed_origins={"http://testserver"},
+        auth_settings=settings,
+        identity_verifier=verify,
+    )
+    with TestClient(app, headers={"origin": "http://testserver"}) as client:
+        client.cookies.set("oidc_session", "golden-authenticated")
+        session_id = client.post("/api/v1/sessions").json()["session_id"]
+        if outcome == "unauthenticated":
+            client.cookies.clear()
+            response = client.get(f"/api/v1/sessions/{session_id}/fields")
+            create_response = client.post("/api/v1/sessions")
+            if response.status_code != 401 or create_response.status_code != 401:
+                raise AssertionError(
+                    f"Golden case {case['id']} did not deny unauthenticated access."
+                )
+        else:
+            response = client.get(f"/api/v1/sessions/{session_id}/fields")
+            if response.status_code != 200:
+                raise AssertionError(
+                    f"Golden case {case['id']} did not allow authenticated access."
+                )
+
+
 def run_golden_evaluation(
     manifest_path: Path, cases_path: Path
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -223,6 +285,8 @@ def run_golden_evaluation(
     validate_manifest(manifest)
     validate_case_coverage(cases, manifest)
     for case in cases:
-        evaluate_case(case, manifest["expected_outcomes"][case["expected_outcome"]])
+        if case.get("auth_access") is None:
+            evaluate_case(case, manifest["expected_outcomes"][case["expected_outcome"]])
+        else:
+            evaluate_auth_access(case)
     return manifest, cases
-

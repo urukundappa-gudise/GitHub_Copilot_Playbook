@@ -95,6 +95,24 @@ resource "aws_iam_role_policy_attachment" "ecs_execution" {
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+data "aws_iam_policy_document" "ecs_secret_read" {
+  count = var.enable_ecs_express && var.azure_ad_client_secret_arn != null ? 1 : 0
+
+  statement {
+    sid       = "ReadConfiguredEntraClientSecret"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [var.azure_ad_client_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "ecs_secret_read" {
+  count  = var.enable_ecs_express && var.azure_ad_client_secret_arn != null ? 1 : 0
+  name   = "${var.ecs_cluster_name}-read-entra-secret"
+  role   = aws_iam_role.ecs_execution[0].name
+  policy = data.aws_iam_policy_document.ecs_secret_read[0].json
+}
+
 data "aws_iam_policy_document" "ecs_infrastructure_trust" {
   statement {
     actions = ["sts:AssumeRole"]

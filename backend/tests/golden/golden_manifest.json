@@ -24,6 +24,7 @@
     ],
     "single_question_pacing": true,
     "human_only_protection": true,
+    "auth_access_outcomes": ["authenticated", "unauthenticated"],
     "human_only_fields": [
       "declaration_accepted",
       "submitter_signature",
@@ -51,4 +52,3 @@
     }
   }
 }
-

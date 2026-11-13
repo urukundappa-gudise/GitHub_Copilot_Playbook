@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { IntakeChat } from './components/IntakeChat';
 import { HumanDeclarations } from './components/HumanDeclarations';
 import { SourcePicker } from './components/SourcePicker';
+import { AuthenticationStatus } from './components/AuthenticationStatus';
 import {
   connectIntakeSocket,
   createSession,
@@ -12,6 +13,7 @@ import {
   sendMessage,
   uploadSource,
 } from './services/intake';
+import { AuthUser, getAuthSession } from './services/auth';
 
 const HUMAN_ONLY_FIELD_KEYS = new Set([
   'declaration_accepted',
@@ -25,13 +27,34 @@ export default function App() {
   const [fields, setFields] = useState<IntakeFieldState[]>([]);
   const [status, setStatus] = useState('Starting secure session');
   const [error, setError] = useState('');
+  const [authRequired, setAuthRequired] = useState(true);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState(
+    new URLSearchParams(window.location.search).get('auth') === 'error'
+      ? 'Sign-in could not be completed. Please try again.'
+      : '',
+  );
   const [sendOverSocket, setSendOverSocket] = useState<((text: string) => Promise<IntakeResult>)>();
 
   useEffect(() => {
     let active = true;
     let closeSocket: (() => void) | undefined;
-    createSession()
-      .then(async (session) => {
+    async function bootstrap() {
+      let authResolved = false;
+      try {
+        const auth = await getAuthSession();
+        authResolved = true;
+        if (!active) return;
+        setAuthRequired(auth.required);
+        setAuthUser(auth.user);
+        setAuthLoading(false);
+        if (auth.required && !auth.user) {
+          setStatus('Sign in required');
+          return;
+        }
+
+        const session = await createSession();
         const state = await getFieldState(session.session_id);
         if (!active) return;
         setSessionId(session.session_id);
@@ -46,13 +69,18 @@ export default function App() {
             connection?.close();
           }
         }
-      })
-      .catch(() => {
-        if (active) {
+      } catch {
+        if (!active) return;
+        if (authResolved) {
           setError('Your session could not be opened. Please try again.');
-          setStatus('Unavailable');
+        } else {
+          setAuthError('Authentication could not be verified. Please try again.');
+          setAuthLoading(false);
         }
-      });
+        setStatus('Unavailable');
+      }
+    }
+    void bootstrap();
     return () => {
       active = false;
       closeSocket?.();
@@ -60,7 +88,7 @@ export default function App() {
   }, []);
 
   async function handleMessage(text: string): Promise<IntakeResult> {
-    if (!sessionId) throw new Error('Session is unavailable.');
+    if (!sessionId || (authRequired && !authUser)) throw new Error('Session is unavailable.');
     setError('');
     try {
       const result = sendOverSocket ? await sendOverSocket(text) : await sendMessage(sessionId, text);
@@ -82,7 +110,7 @@ export default function App() {
   }
 
   async function handleSource(file: File): Promise<void> {
-    if (!sessionId) return;
+    if (!sessionId || (authRequired && !authUser)) return;
     setError('');
     try {
       const result = await uploadSource(sessionId, file);
@@ -130,6 +158,12 @@ export default function App() {
           <span>AIMPLIFY <small>IDEA INTAKE</small></span>
         </a>
         <div className="session-status"><span className="status-dot" />{status.replace(/_/g, ' ')}</div>
+        <AuthenticationStatus
+          required={authRequired}
+          loading={authLoading}
+          user={authUser}
+          error={authError}
+        />
       </header>
 
       <div className="work-area" id="intake">
@@ -143,8 +177,8 @@ export default function App() {
             <span className="step-marker"><span>01</span> / 03</span>
           </div>
 
-          <IntakeChat onSend={handleMessage} disabled={!sessionId} />
-          <SourcePicker disabled={!sessionId} onSelect={handleSource} />
+          <IntakeChat onSend={handleMessage} disabled={!sessionId || (authRequired && !authUser)} />
+          <SourcePicker disabled={!sessionId || (authRequired && !authUser)} onSelect={handleSource} />
           {error && <p className="error-message" role="alert">{error}</p>}
           <p className="privacy-note"><span aria-hidden="true">*</span> Source files and conversation text are processed temporarily.</p>
         </section>
@@ -168,7 +202,9 @@ export default function App() {
               {!fields.some((field) => field.value) && <p className="empty-state">Your accepted details will appear here as you go.</p>}
             </div>
           ) : <p className="empty-state">Preparing your submission…</p>}
-          {sessionId && <HumanDeclarations sessionId={sessionId} fields={fields} onSaved={applyHumanUpdate} />}
+          {sessionId && (!authRequired || authUser) && (
+            <HumanDeclarations sessionId={sessionId} fields={fields} onSaved={applyHumanUpdate} />
+          )}
           <div className="section-progress">
             <div className="progress-caption"><span>Submission progress</span><strong>{fields.length ? Math.round((fields.filter((field) => field.value).length / fields.length) * 100) : 0}%</strong></div>
             <div className="progress-track"><span style={{ width: `${fields.length ? (fields.filter((field) => field.value).length / fields.length) * 100 : 0}%` }} /></div>

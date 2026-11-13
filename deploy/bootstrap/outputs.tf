@@ -14,6 +14,10 @@ output "apprunner_ecr_access_role_arn" {
   value = aws_iam_role.apprunner_ecr_access.arn
 }
 
+output "apprunner_instance_role_arn" {
+  value = aws_iam_role.apprunner_instance.arn
+}
+
 output "ecs_subnet_ids" {
   value = aws_subnet.ecs_public[*].id
 }

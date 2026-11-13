@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import hashlib
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -16,6 +17,8 @@ from aimplify_intake.persistence.models import (
     FieldValue,
     IdeaSubmission,
     IntakeSection,
+    OidcApplicationSession,
+    OidcLoginTransaction,
     SchemaVersion,
 )
 from aimplify_intake.safety.no_facts import is_no_facts_validated
@@ -27,6 +30,157 @@ from aimplify_intake.schema.validation import (
 )
 
 NON_AI_WRITABLE = {"declaration_accepted", "submitter_signature", "date_of_submission", "reviewer_notes"}
+OIDC_TRANSACTION_TTL_SECONDS = 600
+OIDC_SESSION_TTL_SECONDS = 8 * 60 * 60
+
+
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def create_oidc_transaction(
+    session: Session,
+    *,
+    state: str,
+    nonce: str,
+    pkce_verifier: str,
+    now: datetime | None = None,
+    expires_at: datetime | None = None,
+) -> OidcLoginTransaction:
+    created_at = now or datetime.now(UTC)
+    transaction = OidcLoginTransaction(
+        transaction_id=uuid4().hex,
+        state_digest=_digest(state),
+        nonce=nonce,
+        pkce_verifier=pkce_verifier,
+        created_at=created_at,
+        expires_at=expires_at or created_at + timedelta(seconds=OIDC_TRANSACTION_TTL_SECONDS),
+    )
+    session.add(transaction)
+    session.commit()
+    return transaction
+
+
+def consume_oidc_transaction(
+    session: Session, state: str, *, now: datetime | None = None
+) -> OidcLoginTransaction | None:
+    consumed_at = now or datetime.now(UTC)
+    state_digest = _digest(state)
+    try:
+        result = session.execute(
+            update(OidcLoginTransaction)
+            .where(
+                OidcLoginTransaction.state_digest == state_digest,
+                OidcLoginTransaction.expires_at > consumed_at,
+                OidcLoginTransaction.consumed_at.is_(None),
+            )
+            .values(consumed_at=consumed_at)
+        )
+        if result.rowcount != 1:
+            session.rollback()
+            return None
+        transaction = session.scalar(
+            select(OidcLoginTransaction).where(
+                OidcLoginTransaction.state_digest == state_digest
+            )
+        )
+        if transaction is None:
+            session.rollback()
+            return None
+        session.delete(transaction)
+        session.commit()
+        return transaction
+    except Exception:
+        session.rollback()
+        raise
+
+
+def purge_expired_oidc_transactions(
+    session: Session, *, now: datetime | None = None
+) -> int:
+    cutoff = now or datetime.now(UTC)
+    try:
+        result = session.execute(
+            delete(OidcLoginTransaction).where(
+                (OidcLoginTransaction.expires_at <= cutoff)
+                | OidcLoginTransaction.consumed_at.is_not(None)
+            )
+        )
+        session.commit()
+        return int(result.rowcount or 0)
+    except Exception:
+        session.rollback()
+        raise
+
+
+def create_oidc_session(
+    session: Session,
+    raw_token: str,
+    identity: dict[str, object],
+    *,
+    now: datetime | None = None,
+    expires_at: datetime | None = None,
+) -> OidcApplicationSession:
+    created_at = now or datetime.now(UTC)
+    subject = identity.get("oid")
+    upn = identity.get("upn")
+    name = identity.get("name")
+    email = identity.get("email")
+    if not isinstance(subject, str) or not subject.strip():
+        raise ValueError("A verified employee object identifier is required.")
+    if not isinstance(upn, str) or not upn.strip():
+        raise ValueError("A verified employee sign-in name is required.")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("A verified employee display name is required.")
+    if email is not None and not isinstance(email, str):
+        raise ValueError("The verified employee email must be text or null.")
+    record = OidcApplicationSession(
+        session_id=uuid4().hex,
+        token_digest=_digest(raw_token),
+        subject_ref=subject,
+        upn=upn,
+        email=email,
+        name=name,
+        created_at=created_at,
+        expires_at=expires_at
+        or created_at + timedelta(seconds=OIDC_SESSION_TTL_SECONDS),
+    )
+    session.add(record)
+    session.commit()
+    return record
+
+
+def get_active_oidc_session(
+    session: Session, raw_token: str, *, now: datetime | None = None
+) -> OidcApplicationSession | None:
+    current_time = now or datetime.now(UTC)
+    return session.scalar(
+        select(OidcApplicationSession).where(
+            OidcApplicationSession.token_digest == _digest(raw_token),
+            OidcApplicationSession.expires_at > current_time,
+            OidcApplicationSession.revoked_at.is_(None),
+        )
+    )
+
+
+def revoke_oidc_session(
+    session: Session, raw_token: str, *, now: datetime | None = None
+) -> bool:
+    revoked_at = now or datetime.now(UTC)
+    try:
+        result = session.execute(
+            update(OidcApplicationSession)
+            .where(
+                OidcApplicationSession.token_digest == _digest(raw_token),
+                OidcApplicationSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=revoked_at)
+        )
+        session.commit()
+        return result.rowcount == 1
+    except Exception:
+        session.rollback()
+        raise
 
 
 def create_database(database_url: str) -> tuple[Engine, sessionmaker[Session]]:
@@ -139,15 +293,17 @@ def persist_ai_values(session: Session, submission: IdeaSubmission, updates: lis
     schema = publish_schema(load_canonical_schema())
     definitions = {field["key"]: field for field in schema.fields}
     validated = []
-    for update in updates:
-        field_key = update["field_key"]
+    for candidate_update in updates:
+        field_key = candidate_update["field_key"]
         definition = definitions.get(field_key)
         if definition is None or field_key in NON_AI_WRITABLE:
             raise ValueError("Candidate field is not AI-writable.")
         validate_field_origin(definition, "ai_extracted")
-        if not is_no_facts_validated(update):
+        if not is_no_facts_validated(candidate_update):
             raise ValueError("AI candidate has not passed NoFacts validation.")
-        validated.append((field_key, validate_field_value(definition, update["value"])))
+        validated.append(
+            (field_key, validate_field_value(definition, candidate_update["value"]))
+        )
     try:
         for field_key, value in validated:
             current = session.scalar(

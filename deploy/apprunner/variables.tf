@@ -34,7 +34,48 @@ variable "ecr_access_role_arn" {
 }
 
 variable "deployment_environment" {
-  description = "Deployment environment label."
+  description = "Runtime environment; public demos remain unauthenticated while production requires SSO."
   type        = string
   default     = "demo"
+
+  validation {
+    condition     = contains(["demo", "production"], var.deployment_environment)
+    error_message = "deployment_environment must be demo or production."
+  }
+}
+
+variable "apprunner_instance_role_arn" {
+  description = "Bootstrap-provisioned App Runner instance role with access only to the configured client secret."
+  type        = string
+  default     = null
+}
+
+variable "azure_ad_client_secret_arn" {
+  description = "Operator-managed Entra client secret ARN; never provide the secret value."
+  type        = string
+  default     = null
+}
+
+variable "azure_ad_tenant_id" {
+  description = "Entra tenant ID used for OIDC discovery."
+  type        = string
+  default     = ""
+}
+
+variable "azure_ad_client_id" {
+  description = "Entra application client ID."
+  type        = string
+  default     = ""
+}
+
+variable "azure_ad_redirect_uri" {
+  description = "Exact registered OIDC callback URL."
+  type        = string
+  default     = ""
+}
+
+variable "azure_ad_post_logout_redirect_uri" {
+  description = "Exact registered post-logout redirect URL."
+  type        = string
+  default     = ""
 }

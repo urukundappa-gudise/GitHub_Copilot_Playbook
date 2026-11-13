@@ -207,10 +207,13 @@ data "aws_iam_policy_document" "github_permissions" {
   }
 
   statement {
-    sid       = "PassOnlyAppRunnerECRAccessRole"
+    sid       = "PassOnlyAppRunnerECRAndInstanceRoles"
     effect    = "Allow"
     actions   = ["iam:PassRole"]
-    resources = [aws_iam_role.apprunner_ecr_access.arn]
+    resources = [
+      aws_iam_role.apprunner_ecr_access.arn,
+      aws_iam_role.apprunner_instance.arn,
+    ]
   }
 
   dynamic "statement" {
@@ -376,6 +379,59 @@ resource "aws_iam_role" "apprunner_ecr_access" {
     ManagedBy   = "terraform"
     Service     = var.apprunner_service_name
   }
+}
+
+data "aws_iam_policy_document" "apprunner_instance_trust" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["tasks.apprunner.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = [local.apprunner_service_arn]
+    }
+  }
+}
+
+resource "aws_iam_role" "apprunner_instance" {
+  name               = "${var.apprunner_service_name}-instance"
+  assume_role_policy = data.aws_iam_policy_document.apprunner_instance_trust.json
+
+  tags = {
+    Environment = var.deployment_environment
+    ManagedBy   = "terraform"
+    Service     = var.apprunner_service_name
+  }
+}
+
+data "aws_iam_policy_document" "apprunner_secret_read" {
+  count = var.azure_ad_client_secret_arn == null ? 0 : 1
+
+  statement {
+    sid       = "ReadConfiguredEntraClientSecret"
+    effect    = "Allow"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [var.azure_ad_client_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "apprunner_secret_read" {
+  count  = var.azure_ad_client_secret_arn == null ? 0 : 1
+  name   = "${var.apprunner_service_name}-read-entra-secret"
+  role   = aws_iam_role.apprunner_instance.name
+  policy = data.aws_iam_policy_document.apprunner_secret_read[0].json
 }
 
 data "aws_iam_policy_document" "apprunner_ecr_read" {

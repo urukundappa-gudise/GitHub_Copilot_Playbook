@@ -22,6 +22,10 @@ describe('human declarations', () => {
 
   it('keeps AI updates out of human controls and saves explicit human input', async () => {
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'UNAUTHENTICATED' } }), {
+        status: 401,
+        headers: { 'x-authentication-required': 'false' },
+      }))
       .mockResolvedValueOnce(response({ session_id: sessionId, status: 'in_progress', schema_version: 'active' }, 201))
       .mockResolvedValueOnce(response({
         session_id: sessionId,

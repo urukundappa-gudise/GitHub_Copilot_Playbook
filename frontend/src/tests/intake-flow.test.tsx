@@ -16,6 +16,10 @@ describe('intake flow', () => {
 
   it('creates a session, submits chat, and renders safe field updates', async () => {
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'UNAUTHENTICATED' } }), {
+        status: 401,
+        headers: { 'x-authentication-required': 'false' },
+      }))
       .mockResolvedValueOnce(response({ session_id: sessionId, status: 'in_progress', schema_version: 'active' }, 201))
       .mockResolvedValueOnce(response({ session_id: sessionId, schema_version: 'active', sections: [], status: 'in_progress' }))
       .mockResolvedValueOnce(response({
@@ -39,6 +43,10 @@ describe('intake flow', () => {
 
   it('offers file and audio selection and reports upload errors generically', async () => {
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'UNAUTHENTICATED' } }), {
+        status: 401,
+        headers: { 'x-authentication-required': 'false' },
+      }))
       .mockResolvedValueOnce(response({ session_id: sessionId, status: 'in_progress', schema_version: 'active' }, 201))
       .mockResolvedValueOnce(response({ session_id: sessionId, schema_version: 'active', sections: [], status: 'in_progress' }))
       .mockResolvedValueOnce(response({ error: { code: 'SOURCE_INVALID', message: 'This source could not be processed.' } }, 400));
@@ -50,7 +58,7 @@ describe('intake flow', () => {
     fireEvent.change(input, { target: { files: [new File(['bad'], 'private-name.pdf', { type: 'application/pdf' })] } });
 
     expect(await screen.findByText('This source could not be processed.')).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
     expect(screen.queryByText('private-name.pdf')).not.toBeInTheDocument();
   });
 });

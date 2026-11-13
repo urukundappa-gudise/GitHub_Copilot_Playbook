@@ -102,6 +102,12 @@ variable "enable_ecs_express" {
   default     = false
 }
 
+variable "azure_ad_client_secret_arn" {
+  description = "Operator-managed Entra client secret ARN; the secret value is never managed by Terraform."
+  type        = string
+  default     = null
+}
+
 variable "ecs_cluster_name" {
   description = "Dedicated ECS cluster for the Express demo."
   type        = string

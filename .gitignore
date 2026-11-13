@@ -43,3 +43,18 @@ Thumbs.db
 *.tfstate
 *.tfstate.*
 *.tfplan
+
+# Azure credentials and local authentication material
+.azure/
+.azureauth/
+azureProfile.json
+msal_token_cache*
+*token_cache*
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+*.crt
+*.jks
+*.keystore
