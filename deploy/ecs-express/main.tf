@@ -16,8 +16,65 @@ resource "aws_ecs_express_gateway_service" "application" {
     container_port = 8000
 
     environment {
+      name  = "APP_ENV"
+      value = var.deployment_environment
+    }
+
+    environment {
       name  = "AUTH_REQUIRED"
+      value = var.deployment_environment == "production" ? "true" : "false"
+    }
+
+    environment {
+      name  = "AUTH_MOCK_MODE"
       value = "false"
+    }
+
+    environment {
+      name  = "APP_ORIGIN"
+      value = var.app_origin
+    }
+
+    environment {
+      name  = "AZURE_AD_TENANT_ID"
+      value = var.azure_ad_tenant_id
+    }
+
+    environment {
+      name  = "AZURE_AD_CLIENT_ID"
+      value = var.azure_ad_client_id
+    }
+
+    environment {
+      name  = "AZURE_AD_REDIRECT_URI"
+      value = var.azure_ad_redirect_uri
+    }
+
+    environment {
+      name  = "AZURE_AD_POST_LOGOUT_REDIRECT_URI"
+      value = var.azure_ad_post_logout_redirect_uri
+    }
+
+    dynamic "secret" {
+      for_each = var.azure_ad_client_secret_arn == null ? [] : (
+        trimspace(var.azure_ad_client_secret_arn) == "" ? [] : [var.azure_ad_client_secret_arn]
+      )
+
+      content {
+        name       = "AZURE_AD_CLIENT_SECRET"
+        value_from = secret.value
+      }
+    }
+
+    dynamic "secret" {
+      for_each = var.database_url_secret_arn == null ? [] : (
+        trimspace(var.database_url_secret_arn) == "" ? [] : [var.database_url_secret_arn]
+      )
+
+      content {
+        name       = "DATABASE_URL"
+        value_from = secret.value
+      }
     }
   }
 
@@ -40,6 +97,21 @@ resource "aws_ecs_express_gateway_service" "application" {
 
   lifecycle {
     prevent_destroy = true
+
+    precondition {
+      condition = var.deployment_environment != "production" || (
+        var.azure_ad_client_secret_arn != null
+        && try(trimspace(var.azure_ad_client_secret_arn), "") != ""
+        && var.database_url_secret_arn != null
+        && try(trimspace(var.database_url_secret_arn), "") != ""
+        && can(regex("^https://[^/?#]+$", trimspace(var.app_origin)))
+        && trimspace(var.azure_ad_tenant_id) != ""
+        && trimspace(var.azure_ad_client_id) != ""
+        && startswith(var.azure_ad_redirect_uri, "https://")
+        && startswith(var.azure_ad_post_logout_redirect_uri, "https://")
+      )
+      error_message = "Production ECS Express requires an HTTPS origin, Entra settings, and client-secret and database-URL secret ARNs."
+    }
   }
 }
 

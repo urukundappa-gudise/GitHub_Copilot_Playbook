@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from aimplify_intake.api.app import create_app
+from aimplify_intake.api.auth import AuthSettings
 
 
 def _client(monkeypatch: pytest.MonkeyPatch, *, app_origin: str | None = None) -> TestClient:
@@ -113,3 +114,37 @@ def test_websocket_rejects_missing_malformed_and_unapproved_origins(
             pass
 
     assert error.value.code == 4403
+
+
+def test_required_auth_rejects_unapproved_sibling_apprunner_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://approved.example")
+    monkeypatch.delenv("APP_ORIGIN", raising=False)
+    settings = AuthSettings(
+        tenant_id=None,
+        client_id=None,
+        client_secret=None,
+        redirect_uri=None,
+        post_logout_redirect_uri=None,
+        auth_required=True,
+        app_env="production",
+        mock_mode=False,
+    )
+    app = create_app(auth_settings=settings)
+    with TestClient(app) as client:
+        rejected = client.post(
+            "/api/v1/sessions",
+            headers={"origin": "https://unapproved.awsapprunner.com"},
+        )
+        approved = client.post(
+            "/api/v1/sessions",
+            headers={"origin": "https://approved.example"},
+        )
+        same_host = client.post(
+            "/api/v1/sessions",
+            headers={"origin": "http://testserver"},
+        )
+    assert rejected.status_code == 403
+    assert approved.status_code == 401
+    assert same_host.status_code == 403

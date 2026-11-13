@@ -109,6 +109,13 @@ jobs:
           SUBNET_IDS: ${{ vars.ECS_SUBNET_IDS }}
           IMAGE_TAG: ${{ needs.phase-a.outputs.image_tag }}
           DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT || 'demo' }}
+          AZURE_AD_CLIENT_SECRET_ARN: ${{ vars.AZURE_AD_CLIENT_SECRET_ARN || '' }}
+          AZURE_AD_TENANT_ID: ${{ vars.AZURE_AD_TENANT_ID || '' }}
+          AZURE_AD_CLIENT_ID: ${{ vars.AZURE_AD_CLIENT_ID || '' }}
+          AZURE_AD_REDIRECT_URI: ${{ vars.AZURE_AD_REDIRECT_URI || '' }}
+          AZURE_AD_POST_LOGOUT_REDIRECT_URI: ${{ vars.AZURE_AD_POST_LOGOUT_REDIRECT_URI || '' }}
+          DATABASE_URL_SECRET_ARN: ${{ vars.DATABASE_URL_SECRET_ARN || '' }}
+          APP_ORIGIN: ${{ vars.APP_ORIGIN || '' }}
         run: |
           set -euo pipefail
           terraform apply -input=false -auto-approve \
@@ -120,7 +127,14 @@ jobs:
             -var="infrastructure_role_arn=${INFRASTRUCTURE_ROLE_ARN}" \
             -var="subnet_ids=${SUBNET_IDS}" \
             -var="image_tag=${IMAGE_TAG}" \
-            -var="deployment_environment=${DEPLOYMENT_ENVIRONMENT}"
+            -var="deployment_environment=${DEPLOYMENT_ENVIRONMENT}" \
+            -var="azure_ad_client_secret_arn=${AZURE_AD_CLIENT_SECRET_ARN}" \
+            -var="azure_ad_tenant_id=${AZURE_AD_TENANT_ID}" \
+            -var="azure_ad_client_id=${AZURE_AD_CLIENT_ID}" \
+            -var="azure_ad_redirect_uri=${AZURE_AD_REDIRECT_URI}" \
+            -var="azure_ad_post_logout_redirect_uri=${AZURE_AD_POST_LOGOUT_REDIRECT_URI}" \
+            -var="database_url_secret_arn=${DATABASE_URL_SECRET_ARN}" \
+            -var="app_origin=${APP_ORIGIN}"
 
       - name: Wait for healthy service and report URL
         id: health

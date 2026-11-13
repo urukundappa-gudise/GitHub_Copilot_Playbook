@@ -22,6 +22,7 @@ service.
 - The origin guard accepts sibling `*.awsapprunner.com` origins only as an
   explicit cohort-demo convenience. This permits another App Runner service to
   make browser requests and is not appropriate as a production origin policy.
+  Auth-required deployments instead require an explicit approved `app_origin`.
 - App Runner, ECR, and related AWS resources can incur charges. The design
   avoids RDS and a VPC connector; it does not promise a zero-cost AWS service.
 
@@ -37,7 +38,8 @@ service.
    `https://token.actions.githubusercontent.com` with audience
    `sts.amazonaws.com`. Supply that provider's ARN to bootstrap. The bootstrap
    creates the immutable ECR repository, a repository/ref-scoped GitHub role,
-   an App Runner ECR image-pull role, and their scoped policies.
+   an App Runner ECR image-pull role, a separate App Runner instance role, and
+   their scoped policies.
 3. From `deploy/bootstrap/`, initialize the operator-provisioned backend and
    apply with your normal authenticated operator session:
 
@@ -76,8 +78,10 @@ service.
    condition for that list action. Scaling configuration describe/delete calls
    and service updates/deletes are restricted by account, region, and the
    configured service-name ARN pattern.    Scaling configuration tag operations are limited to that same named scaling
-   configuration. `iam:PassRole` names only the App Runner ECR access role;
-   that role's trust policy names the App Runner build service principal.
+   configuration. `iam:PassRole` names only the App Runner ECR access and
+   instance roles. The ECR role trusts the App Runner build service; the
+   instance role trusts App Runner tasks and reads only the configured Entra
+   secret ARN.
    The service name must be 4-25 characters: the scaling configuration appends
    `-single`, and AWS limits its name to 32 characters. Use the same service
    name in both Terraform roots.
@@ -90,10 +94,11 @@ service.
    | `AWS_DEPLOY_ROLE_ARN` | `github_deployment_role_arn` output |
    | `ECR_REPOSITORY` | `ecr_repository_name` output |
    | `APP_RUNNER_ECR_ACCESS_ROLE_ARN` | `apprunner_ecr_access_role_arn` output |
+   | `APP_RUNNER_INSTANCE_ROLE_ARN` | `apprunner_instance_role_arn` output |
    | `APP_RUNNER_SERVICE_NAME` | Same service name passed to bootstrap |
    | `TF_STATE_BUCKET` | The pre-provisioned state bucket |
    | `TF_APP_RUNNER_STATE_KEY` | `apprunner/service.tfstate` |
-   | `DEPLOYMENT_ENVIRONMENT` | `demo` (or the chosen resource tag value) |
+   |    `DEPLOYMENT_ENVIRONMENT` | `demo` or `production` |
 
    The AWS role trust accepts only audience `sts.amazonaws.com` and the exact
    `repo:<owner>@<owner-id>/<repository>@<repository-id>:ref:refs/heads/main`
@@ -118,6 +123,37 @@ service.
 The workflow has no static AWS credentials. The Terraform S3 backend is
 operator-provisioned; state bucket, key, and region are supplied to `terraform
 init` at run time.
+
+## Enterprise SSO rollout
+
+The public demo remains `APP_ENV=demo` with `AUTH_REQUIRED=false`; it uses the
+shared demo identity and must not receive production or private intake data.
+For an enterprise service:
+
+1. Register the exact `https://<service-host>/api/v1/auth/callback` and
+   post-logout redirect URLs with the Entra application.
+2. Create and rotate the Entra client secret directly in AWS Secrets Manager.
+   Do not place the secret value in Terraform variables, GitHub variables,
+   source files, images, or shell history. Configure only its ARN as
+   `azure_ad_client_secret_arn`.
+3. Apply the bootstrap stack with `deployment_environment=production` and the
+   secret ARN. Configure `APP_RUNNER_INSTANCE_ROLE_ARN` from the bootstrap
+   output, and pass the ARN plus non-secret tenant ID, client ID, exact
+   callback URL, and post-logout URL to `deploy/apprunner`.
+4. Configure `deployment_environment=production`. The service sets
+   `APP_ENV=production`, `AUTH_REQUIRED=true`, and `AUTH_MOCK_MODE=false`; the
+   Terraform precondition rejects missing Entra settings, secret ARN, or
+   instance role. App Runner injects `AZURE_AD_CLIENT_SECRET` from Secrets
+   Manager through `runtime_environment_secrets`.
+5. Apply the authentication database migration to the shared database before
+   routing users to the service. The ASGI entrypoint builds and injects the
+   database-backed `IdentityVerifier`; startup fails if required production
+   configuration is incomplete. Confirm the runtime role can read only the
+   configured secret ARN.
+
+The deployment workflow does not manage secret values. Live Entra login,
+shared-database migration, IAM permissions, and callback URLs remain operator
+release checks.
 
 ## Post-deployment release verification
 

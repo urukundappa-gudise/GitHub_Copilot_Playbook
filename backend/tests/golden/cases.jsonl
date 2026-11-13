@@ -48,3 +48,5 @@
 {"id":"case-048","modality":"audio","no_facts_categories":["word_quantity"],"claim":"Runs for three days.","expected_outcome":"safe_fields_one_question"}
 {"id":"case-049","modality":"chat","no_facts_categories":["word_quantity"],"claim":"Handles one request.","expected_outcome":"safe_fields_one_question"}
 {"id":"case-050","modality":"document","no_facts_categories":["word_quantity"],"claim":"Uses a hundred records.","expected_outcome":"safe_fields_one_question"}
+{"id":"auth-authenticated-001","modality":"chat","no_facts_categories":["number"],"claim":"An authenticated employee accesses their own intake.","expected_outcome":"safe_fields_one_question","auth_access":"authenticated"}
+{"id":"auth-unauthenticated-001","modality":"chat","no_facts_categories":["number"],"claim":"An unauthenticated visitor is denied intake access.","expected_outcome":"safe_fields_one_question","auth_access":"unauthenticated"}

@@ -39,6 +39,54 @@ variable "subnet_ids" {
 }
 
 variable "deployment_environment" {
-  type    = string
-  default = "demo"
+  description = "Runtime environment; public demos remain unauthenticated while production requires SSO."
+  type        = string
+  default     = "demo"
+
+  validation {
+    condition     = contains(["demo", "production"], var.deployment_environment)
+    error_message = "deployment_environment must be demo or production."
+  }
+}
+
+variable "azure_ad_client_secret_arn" {
+  description = "Operator-managed Entra client secret ARN; never provide the secret value."
+  type        = string
+  default     = null
+}
+
+variable "database_url_secret_arn" {
+  description = "Secrets Manager ARN containing the complete database URL as a raw string."
+  type        = string
+  default     = null
+}
+
+variable "app_origin" {
+  description = "Approved HTTPS application origin without a trailing slash."
+  type        = string
+  default     = ""
+}
+
+variable "azure_ad_tenant_id" {
+  description = "Entra tenant ID used for OIDC discovery."
+  type        = string
+  default     = ""
+}
+
+variable "azure_ad_client_id" {
+  description = "Entra application client ID."
+  type        = string
+  default     = ""
+}
+
+variable "azure_ad_redirect_uri" {
+  description = "Exact registered OIDC callback URL."
+  type        = string
+  default     = ""
+}
+
+variable "azure_ad_post_logout_redirect_uri" {
+  description = "Exact registered post-logout redirect URL."
+  type        = string
+  default     = ""
 }

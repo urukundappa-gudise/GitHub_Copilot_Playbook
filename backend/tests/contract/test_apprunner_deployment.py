@@ -79,13 +79,13 @@ def test_bootstrap_trust_and_iam_permissions_are_narrowly_scoped() -> None:
     assert 'variable = "aws:RequestTag/Service"' in bootstrap
     assert 'variable = "aws:RequestTag/Name"' in bootstrap
     assert 'variable = "aws:RequestedRegion"' in bootstrap
-    assert 'sid       = "PassOnlyAppRunnerECRAccessRole"' in bootstrap
-    assert "resources = [aws_iam_role.apprunner_ecr_access.arn]" in bootstrap
-    pass_role = bootstrap.split('sid       = "PassOnlyAppRunnerECRAccessRole"', 1)[1].split(
+    assert re.search(r'sid\s*=\s*"PassOnlyAppRunnerECRAndInstanceRoles"', bootstrap)
+    pass_role = bootstrap.split('"PassOnlyAppRunnerECRAndInstanceRoles"', 1)[1].split(
         "\n  }", 1
     )[0]
-    assert 'actions   = ["iam:PassRole"]' in pass_role
-    assert "resources = [aws_iam_role.apprunner_ecr_access.arn]" in pass_role
+    assert re.search(r'actions\s*=\s*\["iam:PassRole"\]', pass_role)
+    assert "aws_iam_role.apprunner_ecr_access.arn" in pass_role
+    assert "aws_iam_role.apprunner_instance.arn" in pass_role
     assert 'variable = "aws:SourceAccount"' in bootstrap
     assert 'variable = "aws:SourceArn"' in bootstrap
     assert "var.state_bucket_name}/${key}" in bootstrap
@@ -93,7 +93,10 @@ def test_bootstrap_trust_and_iam_permissions_are_narrowly_scoped() -> None:
 
     apprunner = _read("deploy/apprunner/main.tf")
     assert 'auto_deployments_enabled = false' in apprunner
-    assert 'AUTH_REQUIRED = "false"' in apprunner
+    assert re.search(
+        r'AUTH_REQUIRED\s+= var\.deployment_environment == "production" \? "true" : "false"',
+        apprunner,
+    )
     assert "DATABASE_URL" not in apprunner
     assert 'path                = "/health/live"' in apprunner
     assert 'is_publicly_accessible = true' in apprunner

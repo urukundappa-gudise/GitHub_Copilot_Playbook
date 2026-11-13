@@ -119,3 +119,41 @@ class FieldValue(Base):
         ),
     )
 
+
+class OidcLoginTransaction(Base):
+    __tablename__ = "oidc_login_transactions"
+
+    transaction_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    state_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    nonce: Mapped[str] = mapped_column(String(255), nullable=False)
+    pkce_verifier: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("length(state_digest) > 0", name="ck_oidc_transaction_state_digest"),
+        CheckConstraint("length(nonce) > 0", name="ck_oidc_transaction_nonce"),
+        CheckConstraint("length(pkce_verifier) > 0", name="ck_oidc_transaction_pkce_verifier"),
+    )
+
+
+class OidcApplicationSession(Base):
+    __tablename__ = "oidc_application_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    token_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    subject_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    upn: Mapped[str] = mapped_column(String(320), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(320))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("length(token_digest) > 0", name="ck_oidc_session_token_digest"),
+        CheckConstraint("length(subject_ref) > 0", name="ck_oidc_session_subject"),
+        CheckConstraint("length(upn) > 0", name="ck_oidc_session_upn"),
+        CheckConstraint("length(name) > 0", name="ck_oidc_session_name"),
+    )
