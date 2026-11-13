@@ -120,7 +120,7 @@ describe('authenticated intake bootstrap', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
-    expect(await screen.findByRole('textbox', { name: /message/i })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: /message/i })).toBeEnabled());
     expect(screen.getByText('Employee Name')).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
