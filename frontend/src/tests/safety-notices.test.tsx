@@ -12,6 +12,18 @@ function response(body: unknown, status = 200): Response {
   });
 }
 
+function stubFetch(fetchMock: ReturnType<typeof vi.fn>) {
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === '/api/v1/auth/session') {
+      return Promise.resolve(new Response(JSON.stringify({ error: { code: 'UNAUTHENTICATED' } }), {
+        status: 401,
+        headers: { 'x-authentication-required': 'false' },
+      }));
+    }
+    return fetchMock(input, init);
+  });
+}
+
 function initialState() {
   return {
     session_id: sessionId,
@@ -43,7 +55,7 @@ describe('safety notices', () => {
       .mockReturnValueOnce(unlinked)
       .mockReturnValueOnce(linked)
       .mockImplementation(() => Promise.resolve(response(safe)));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
     const composer = await screen.findByRole('textbox', { name: 'Message' });
     const send = screen.getByRole('button', { name: 'Send' });
@@ -96,7 +108,7 @@ describe('safety notices', () => {
         .mockResolvedValueOnce(outcome === 'failed' || outcome === 'invalid'
           ? response({ error: { code: 'SERVICE_UNAVAILABLE' } }, outcome === 'failed' ? 503 : 422)
           : response(correction));
-      vi.stubGlobal('fetch', fetchMock);
+      stubFetch(fetchMock);
       render(<App />);
       const composer = await screen.findByRole('textbox', { name: /message/i });
       fireEvent.change(composer, { target: { value: 'Rejected request' } });
@@ -136,7 +148,7 @@ describe('safety notices', () => {
       .mockResolvedValueOnce(response(rejected))
       .mockResolvedValueOnce(response({ request_id: 'safe', field_updates: safeUpdates, clarification: null, status: 'in_progress', safety_notice: null }))
       .mockResolvedValueOnce(response(rejected));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
     const composer = await screen.findByRole('textbox', { name: /message/i });
     const send = screen.getByRole('button', { name: 'Send' });
@@ -212,7 +224,7 @@ describe('safety notices', () => {
           reasons: ['number', 'percentage'],
         },
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     const composer = await screen.findByRole('textbox', { name: /message/i });
@@ -247,7 +259,7 @@ describe('safety notices', () => {
         status: 'in_progress',
         safety_notice: { code: 'NO_FACTS_REJECTED', status: 'denied', reason: 'NoFacts', reasons: [] },
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     fireEvent.change(await screen.findByRole('textbox', { name: /message/i }), {
@@ -327,7 +339,7 @@ describe('safety notices', () => {
         status: 'in_progress',
         safety_notice: { code: 'NO_FACTS_REJECTED', status: 'denied', reason: 'NoFacts', reasons: ['number'] },
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     const composer = await screen.findByRole('textbox', { name: /message/i });
@@ -382,7 +394,7 @@ describe('safety notices', () => {
         status: 'in_progress',
         safety_notice: null,
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     fireEvent.change(await screen.findByRole('textbox', { name: /message/i }), {
@@ -421,7 +433,7 @@ describe('safety notices', () => {
         status: 'in_progress',
         safety_notice: { code: 'UNRECOGNIZED', status: 'denied', reason: 'NoFacts', reasons: ['number'] },
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     fireEvent.change(await screen.findByRole('textbox', { name: /message/i }), {
@@ -460,7 +472,7 @@ describe('safety notices', () => {
         status: 'in_progress',
         safety_notice: null,
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     const composer = await screen.findByRole('textbox', { name: /message/i });

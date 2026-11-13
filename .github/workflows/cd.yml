@@ -1,0 +1,155 @@
+name: Deploy ECS Express Demo
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecs-express-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  phase-a:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image_tag: ${{ steps.publish.outputs.image_tag }}
+    steps:
+      - name: Check out authorized deployment ref
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push immutable commit image
+        id: publish
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          set -euo pipefail
+          image="${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+          if aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "imageTag=${GITHUB_SHA}" >/dev/null 2>&1; then
+            echo "Immutable image ${GITHUB_SHA} already exists; reusing it."
+          else
+            docker build --pull --tag "$image" .
+            docker push "$image"
+          fi
+          echo "image_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+  phase-b:
+    needs:
+      - phase-a
+    if: needs.phase-a.result == 'success' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    outputs:
+      service_url: ${{ steps.health.outputs.service_url }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_ECS_STATE_KEY: ${{ vars.TF_ECS_STATE_KEY }}
+    steps:
+      - name: Check out authorized deployment ref
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+
+      - name: Initialize ECS Express Terraform state
+        working-directory: deploy/ecs-express
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_ECS_STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="use_lockfile=true" \
+            -lockfile=readonly
+
+      - name: Create or update service from the pushed image
+        working-directory: deploy/ecs-express
+        env:
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          SERVICE_NAME: ${{ vars.ECS_SERVICE_NAME }}
+          CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+          EXECUTION_ROLE_ARN: ${{ vars.ECS_EXECUTION_ROLE_ARN }}
+          INFRASTRUCTURE_ROLE_ARN: ${{ vars.ECS_INFRASTRUCTURE_ROLE_ARN }}
+          SUBNET_IDS: ${{ vars.ECS_SUBNET_IDS }}
+          IMAGE_TAG: ${{ needs.phase-a.outputs.image_tag }}
+          DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT || 'demo' }}
+          AZURE_AD_CLIENT_SECRET_ARN: ${{ vars.AZURE_AD_CLIENT_SECRET_ARN || '' }}
+          AZURE_AD_TENANT_ID: ${{ vars.AZURE_AD_TENANT_ID || '' }}
+          AZURE_AD_CLIENT_ID: ${{ vars.AZURE_AD_CLIENT_ID || '' }}
+          AZURE_AD_REDIRECT_URI: ${{ vars.AZURE_AD_REDIRECT_URI || '' }}
+          AZURE_AD_POST_LOGOUT_REDIRECT_URI: ${{ vars.AZURE_AD_POST_LOGOUT_REDIRECT_URI || '' }}
+        run: |
+          set -euo pipefail
+          terraform apply -input=false -auto-approve \
+            -var="aws_region=${AWS_REGION}" \
+            -var="ecr_repository_name=${ECR_REPOSITORY}" \
+            -var="service_name=${SERVICE_NAME}" \
+            -var="cluster_name=${CLUSTER_NAME}" \
+            -var="execution_role_arn=${EXECUTION_ROLE_ARN}" \
+            -var="infrastructure_role_arn=${INFRASTRUCTURE_ROLE_ARN}" \
+            -var="subnet_ids=${SUBNET_IDS}" \
+            -var="image_tag=${IMAGE_TAG}" \
+            -var="deployment_environment=${DEPLOYMENT_ENVIRONMENT}" \
+            -var="azure_ad_client_secret_arn=${AZURE_AD_CLIENT_SECRET_ARN}" \
+            -var="azure_ad_tenant_id=${AZURE_AD_TENANT_ID}" \
+            -var="azure_ad_client_id=${AZURE_AD_CLIENT_ID}" \
+            -var="azure_ad_redirect_uri=${AZURE_AD_REDIRECT_URI}" \
+            -var="azure_ad_post_logout_redirect_uri=${AZURE_AD_POST_LOGOUT_REDIRECT_URI}"
+
+      - name: Wait for healthy service and report URL
+        id: health
+        working-directory: deploy/ecs-express
+        run: |
+          set -euo pipefail
+          endpoint="$(terraform output -json ingress_paths | jq -er '[.[] | select(.access_type == "PUBLIC") | .endpoint] | if length == 1 then .[0] else error("Expected one public ingress endpoint") end')"
+          case "$endpoint" in
+            https://*) service_url="${endpoint%/}" ;;
+            *) service_url="https://${endpoint%/}" ;;
+          esac
+          for attempt in $(seq 1 60); do
+            if curl --silent --show-error --fail --max-time 10 "$service_url/health/live"; then
+              echo "ECS Express is healthy at $service_url"
+              echo "service_url=$service_url" >> "$GITHUB_OUTPUT"
+              echo "ECS Express demo: $service_url" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "ECS Express did not become healthy within 10 minutes: $service_url" >&2
+          exit 1

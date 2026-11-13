@@ -14,7 +14,7 @@ from aimplify_intake.persistence.repositories import (
 )
 
 IdentityResolver = Callable[[str | None], str]
-OriginValidator = Callable[[str | None], None]
+OriginValidator = Callable[[str | None, str | None], None]
 
 
 class HumanFieldBody(BaseModel):
@@ -30,7 +30,7 @@ def create_human_fields_router(
     async def update_human_field(
         session_id: str, field_key: str, body: HumanFieldBody, request: Request
     ) -> dict[str, str]:
-        require_allowed_origin(request.headers.get("origin"))
+        require_allowed_origin(request.headers.get("origin"), request.headers.get("host"))
         subject = subject_for(request.cookies.get("oidc_session"))
         with request.app.state.session_factory() as session:
             submission = get_authorized_submission(session, session_id, subject)

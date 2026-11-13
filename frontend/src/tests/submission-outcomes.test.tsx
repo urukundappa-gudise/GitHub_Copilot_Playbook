@@ -11,6 +11,18 @@ function response(body: unknown, status = 200): Response {
   });
 }
 
+function stubFetch(fetchMock: ReturnType<typeof vi.fn>) {
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === '/api/v1/auth/session') {
+      return Promise.resolve(new Response(JSON.stringify({ error: { code: 'UNAUTHENTICATED' } }), {
+        status: 401,
+        headers: { 'x-authentication-required': 'false' },
+      }));
+    }
+    return fetchMock(input, init);
+  });
+}
+
 function state(session: string, ready = true) {
   return {
     session_id: session,
@@ -37,7 +49,7 @@ describe('submission outcomes', () => {
       .mockResolvedValueOnce(response(state(sessionId)))
       .mockResolvedValueOnce(response(state(sessionId)))
       .mockResolvedValueOnce(response({ session_id: sessionId, status: 'submitted', submitted_at: '2026-11-11T12:00:00Z' }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /submit idea/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/idea is submitted.*dialog could not be displayed/i);
@@ -56,7 +68,7 @@ describe('submission outcomes', () => {
       .mockReturnValueOnce(pending)
       .mockRejectedValueOnce(new TypeError('response lost'))
       .mockResolvedValueOnce(response({ ...state(sessionId), status: 'submitted', submitted_at: '2026-11-11T12:00:00Z' }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
     const submit = await screen.findByRole('button', { name: /submit idea/i });
     fireEvent.click(submit);
@@ -76,7 +88,7 @@ describe('submission outcomes', () => {
       .mockResolvedValueOnce(response({ session_id: sessionId, status: 'in_progress', schema_version: 'active' }))
       .mockResolvedValueOnce(response(state(sessionId)))
       .mockResolvedValueOnce(response({ ...state(sessionId, false), readiness: { ready: false, missing_fields: [], invalid_fields: ['submitter_email'] } }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /submit idea/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('submitter_email');
@@ -93,7 +105,7 @@ describe('submission outcomes', () => {
       .mockReturnValueOnce(pending)
       .mockResolvedValueOnce(response({ session_id: 'fresh-mount', status: 'in_progress', schema_version: 'active' }))
       .mockResolvedValueOnce(response(state('fresh-mount')));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     const old = render(<App />);
     const picker = await screen.findByLabelText('Choose a document or audio file');
     await waitFor(() => expect(picker).toBeEnabled());
@@ -125,7 +137,7 @@ describe('submission outcomes', () => {
       .mockResolvedValueOnce(response({ error: { code: 'SERVICE_UNAVAILABLE' } }, 503))
       .mockReturnValueOnce(signature)
       .mockReturnValueOnce(date);
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Save Declaration' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
@@ -147,7 +159,7 @@ describe('submission outcomes', () => {
         schema_version: 'active',
       }, 201))
       .mockResolvedValueOnce(response(state(sessionId)));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     await screen.findByRole('textbox', { name: /message/i });
@@ -170,7 +182,7 @@ describe('submission outcomes', () => {
           ],
         }],
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     fireEvent.change(await screen.findByRole('textbox', { name: /submitter signature/i }), {
@@ -191,7 +203,7 @@ describe('submission outcomes', () => {
       .mockResolvedValueOnce(response({ session_id: sessionId, status: 'in_progress', schema_version: 'active' }, 201))
       .mockResolvedValueOnce(response(state(sessionId)))
       .mockReturnValueOnce(pendingMessage);
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     fireEvent.change(await screen.findByRole('textbox', { name: /message/i }), {
@@ -222,7 +234,7 @@ describe('submission outcomes', () => {
         status: 'submitted',
         submitted_at: '2026-11-11T12:00:00Z',
       }));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /submit/i }));
@@ -244,7 +256,7 @@ describe('submission outcomes', () => {
       .mockResolvedValueOnce(response({ session_id: sessionId, status: 'submitted', submitted_at: '2026-11-11T12:00:00Z' }))
       .mockResolvedValueOnce(response({ session_id: nextSessionId, status: 'in_progress', schema_version: 'active' }, 201))
       .mockResolvedValueOnce(response(state(nextSessionId)));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /submit/i }));
@@ -263,7 +275,7 @@ describe('submission outcomes', () => {
       .mockResolvedValueOnce(response(state(sessionId)))
       .mockRejectedValueOnce(new TypeError('network unavailable'))
       .mockResolvedValueOnce(response(state(sessionId)));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /submit/i }));
@@ -286,7 +298,7 @@ describe('submission outcomes', () => {
       .mockResolvedValueOnce(response({ session_id: nextSessionId, status: 'in_progress', schema_version: 'active' }, 201))
       .mockResolvedValueOnce(response({ error: { code: 'SERVICE_UNAVAILABLE' } }, 503))
       .mockResolvedValueOnce(response(state(nextSessionId)));
-    vi.stubGlobal('fetch', fetchMock);
+    stubFetch(fetchMock);
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /submit/i }));

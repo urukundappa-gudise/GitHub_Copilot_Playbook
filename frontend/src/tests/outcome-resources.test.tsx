@@ -119,6 +119,12 @@ describe('owned outcome resources', () => {
     const submitted = new Set<string>();
     const failedPreparation = new Set<string>();
     vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url === '/api/v1/auth/session') {
+        return Promise.resolve(new Response(JSON.stringify({ error: { code: 'UNAUTHENTICATED' } }), {
+          status: 401,
+          headers: { 'x-authentication-required': 'false' },
+        }));
+      }
       if (url === '/api/v1/sessions') {
         return Promise.resolve(response({ session_id: `cycle-${++sessionNumber}`, status: 'in_progress', schema_version: 'active' }));
       }

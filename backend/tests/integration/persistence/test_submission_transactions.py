@@ -345,7 +345,7 @@ def test_submission_timestamp_migration_roundtrips_without_losing_drafts(persist
     assert "submitted_at" in {
         column["name"] for column in inspect(engine).get_columns("idea_submissions")
     }
-    command.downgrade(config, "-1")
+    command.downgrade(config, "0002_human_only_field_constraints")
     assert "submitted_at" not in {
         column["name"] for column in inspect(engine).get_columns("idea_submissions")
     }

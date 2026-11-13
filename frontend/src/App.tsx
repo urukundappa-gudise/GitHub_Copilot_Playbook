@@ -4,6 +4,7 @@ import { HumanDeclarations } from './components/HumanDeclarations';
 import { OutcomeDialog } from './components/OutcomeDialog';
 import { SafetyDenialBanner } from './components/SafetyDenialBanner';
 import { SourcePicker } from './components/SourcePicker';
+import { AuthenticationStatus } from './components/AuthenticationStatus';
 import {
   connectIntakeSocket,
   decodeSubmissionReceipt,
@@ -23,6 +24,7 @@ import {
   sendMessage,
   uploadSource,
 } from './services/intake';
+import { AuthUser, getAuthSession } from './services/auth';
 
 const HUMAN_ONLY_FIELD_KEYS = new Set([
   'declaration_accepted',
@@ -92,13 +94,35 @@ export default function App() {
     setDialogOpen(false);
     setError('Your idea is submitted, but the confirmation dialog could not be displayed. Use the submitted summary to start a new idea.');
   }, []);
+  const [authRequired, setAuthRequired] = useState(true);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState(
+    new URLSearchParams(window.location.search).get('auth') === 'error'
+      ? 'Sign-in could not be completed. Please try again.'
+      : '',
+  );
 
   useEffect(() => {
     mountedRef.current = true;
     const frames = focusFrames.current;
     let active = true;
-    createSession()
-      .then(async (session) => {
+    let closeSocket: (() => void) | undefined;
+    async function bootstrap() {
+      let authResolved = false;
+      try {
+        const auth = await getAuthSession();
+        authResolved = true;
+        if (!active) return;
+        setAuthRequired(auth.required);
+        setAuthUser(auth.user);
+        setAuthLoading(false);
+        if (auth.required && !auth.user) {
+          setStatus('Sign in required');
+          return;
+        }
+
+        const session = await createSession();
         const state = await getFieldState(session.session_id);
         if (!active) return;
         setSessionId(session.session_id);
@@ -114,13 +138,18 @@ export default function App() {
             connection?.close();
           }
         }
-      })
-      .catch(() => {
-        if (active) {
+      } catch {
+        if (!active) return;
+        if (authResolved) {
           setError('Your session could not be opened. Please try again.');
-          setStatus('Unavailable');
+        } else {
+          setAuthError('Authentication could not be verified. Please try again.');
+          setAuthLoading(false);
         }
-      });
+        setStatus('Unavailable');
+      }
+    }
+    void bootstrap();
     return () => {
       active = false;
       mountedRef.current = false;
@@ -137,7 +166,7 @@ export default function App() {
   }, [dialogOpen, lifecycle, receipt]);
 
   async function handleMessage(text: string): Promise<IntakeResult> {
-    if (!sessionId || !isCurrent() || lifecycleRef.current !== 'editing') throw new Error('Session is unavailable.');
+    if (!sessionId || !isCurrent() || lifecycleRef.current !== 'editing' || (authRequired && !authUser)) throw new Error('Session is unavailable.');
     const requestId = crypto.randomUUID();
     const linkedNotice = correctionTargetRef.current;
     const initiatingControl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -180,7 +209,7 @@ export default function App() {
   }
 
   async function handleSource(file: File): Promise<void> {
-    if (!sessionId || !isCurrent() || lifecycleRef.current !== 'editing') return;
+    if (!sessionId || !isCurrent() || lifecycleRef.current !== 'editing' || (authRequired && !authUser)) return;
     if (!isSupportedSource(file)) {
       setError('This source could not be processed.');
       return;
@@ -481,6 +510,12 @@ export default function App() {
           <span>AIMPLIFY <small>IDEA INTAKE</small></span>
         </a>
         <div className="session-status"><span className="status-dot" />{status.replace(/_/g, ' ')}</div>
+        <AuthenticationStatus
+          required={authRequired}
+          loading={authLoading}
+          user={authUser}
+          error={authError}
+        />
       </header>
 
       <div className="work-area" id="intake">
@@ -494,8 +529,8 @@ export default function App() {
             <span className="step-marker"><span>01</span> / 03</span>
           </div>
 
-          <IntakeChat key={`chat-${generation}`} onSend={handleMessage} disabled={!sessionId || frozen} />
-          <SourcePicker key={`source-${generation}`} disabled={!sessionId || frozen} onSelect={handleSource} />
+          <IntakeChat key={`chat-${generation}`} onSend={handleMessage} disabled={!sessionId || frozen || (authRequired && !authUser)} />
+          <SourcePicker key={`source-${generation}`} disabled={!sessionId || frozen || (authRequired && !authUser)} onSelect={handleSource} />
           {error && <p className="error-message" role="alert">{error}</p>}
           {notices.map((entry) => (
             <SafetyDenialBanner
@@ -565,7 +600,7 @@ export default function App() {
               {!fields.some((field) => field.value) && <p className="empty-state">Your accepted details will appear here as you go.</p>}
             </div>
           ) : <p className="empty-state">Preparing your submission…</p>}
-          {sessionId && (
+          {sessionId && (!authRequired || authUser) && (
             <HumanDeclarations
               key={`declarations-${generation}`}
               sessionId={sessionId}
