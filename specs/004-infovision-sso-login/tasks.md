@@ -180,7 +180,8 @@ T026 backend/tests/integration/test_auth_required.py
 
 - [X] T034 Redact or suppress Uvicorn access-log query strings for `/api/v1/auth/callback` and add a runtime log regression test covering code, state, and provider-error sentinels per FR-012 (contradicts).
 - [ ] T035 Run staged Entra sign-in/logout and required-auth failure scenarios, including secret resolution and IAM scope, and record only sanitized outcomes per SC-005 and T033 (partial).
-- [ ] T036 Validate the complete Alembic chain from an empty PostgreSQL database through `0003_oidc_sessions` per plan: PostgreSQL storage decision and T033 (partial).
+- [X] T036 Validate the complete Alembic chain from an empty PostgreSQL database through `0003_oidc_sessions` per plan: PostgreSQL storage decision and T033 (partial).
+  - Evidence: [CI run 43420334285](https://github.com/urukundappa-gudise/GitHub_Copilot_Playbook/actions/runs/43420334285) passed the PostgreSQL 16 migration job for commit `b314370db499dd5bb56dbabbb31205d6df53b445`. This verifies the ephemeral CI database, not staging database availability or migration.
 - [ ] T037 Conduct the usability acceptance with 10 eligible InfoVision employees, record aggregate results only, and require at least 9 successful outcomes per SC-006 (missing).
 - [X] T038 Pass the runtime identity verifier into `create_app` during ASGI entrypoint construction and add entrypoint wiring/fail-closed tests per plan: authentication boundaries and T009 (partial).
 
