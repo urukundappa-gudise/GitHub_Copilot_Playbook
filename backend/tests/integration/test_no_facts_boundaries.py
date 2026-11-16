@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 import aimplify_intake.api.app as app_module
 from aimplify_intake.api.app import create_app
 from aimplify_intake.persistence.repositories import create_submission, persist_ai_values
+from aimplify_intake.persistence.models import FieldValue, IdeaSubmission
+from sqlalchemy import select
 from aimplify_intake.services.extraction import extract_safe_candidates
 
 _ATTACKS = {
@@ -33,6 +35,13 @@ _AUDIO_TYPES = {
     "mp3": ("audio/mpeg", "audio/mpeg"),
     "webm": ("audio/webm", "audio/webm"),
 }
+_REASONS = {
+    "numeral": ["number"],
+    "percentage": ["percentage", "word_quantity"],
+    "cost": ["number", "cost"],
+    "date": ["number", "date"],
+    "word_quantity": ["word_quantity"],
+}
 
 
 @pytest.mark.parametrize("claim", _ATTACKS.values(), ids=_ATTACKS.keys())
@@ -49,6 +58,7 @@ def test_unverified_claims_never_reach_persistence_or_client_events(
     transport: str,
     modality: str,
     source_type: str | None,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     def read_source(source: BytesIO, *_args: object, **_kwargs: object) -> str:
         return source.read().decode("utf-8")
@@ -59,12 +69,19 @@ def test_unverified_claims_never_reach_persistence_or_client_events(
     app = create_app(
         database_url="sqlite+pysqlite:///:memory:",
         identity_verifier=lambda _cookie: {"subject": "employee-1"},
-        candidate_extractor=lambda text: {"problem_statement": text},
+        candidate_extractor=lambda text: {"problem_statement": text, "idea_title": "Workflow helper"},
         transcription_no_retention_approved=True,
     )
     with TestClient(app, headers={"origin": "http://testserver"}) as client:
         client.cookies.set("oidc_session", "test-session")
         session_id = client.post("/api/v1/sessions").json()["session_id"]
+        with app.state.session_factory() as session:
+            submission = session.get(IdeaSubmission, session_id)
+            assert submission is not None
+            persist_ai_values(session, submission, extract_safe_candidates(
+                "", lambda _text: {"problem_statement": "Existing safe detail"}
+            ))
+            session.commit()
 
         if modality == "chat" and transport == "http":
             response = client.post(
@@ -72,7 +89,8 @@ def test_unverified_claims_never_reach_persistence_or_client_events(
                 json={"request_id": "unsafe-chat", "text": claim},
             )
             assert response.status_code == 200
-            assert response.json()["field_updates"] == []
+            assert [update["field_key"] for update in response.json()["field_updates"]] == ["idea_title"]
+            notice = response.json()["safety_notice"]
             client_output = response.text
         elif modality == "chat":
             with client.websocket_connect(
@@ -87,8 +105,9 @@ def test_unverified_claims_never_reach_persistence_or_client_events(
                         "payload": {"text": claim},
                     }
                 )
-                events = [websocket.receive_json(), websocket.receive_json()]
-            assert all(event["type"] != "server.field.updated" for event in events)
+                events = [websocket.receive_json(), websocket.receive_json(), websocket.receive_json()]
+            assert events[-1]["type"] == "server.submission.status"
+            notice = events[-1]["payload"]["safety_notice"]
             client_output = str(events)
         else:
             source_type = source_type or ""
@@ -101,7 +120,8 @@ def test_unverified_claims_never_reach_persistence_or_client_events(
                     headers={"content-type": content_type},
                 )
                 assert response.status_code == 200
-                assert response.json()["field_updates"] == []
+                assert [update["field_key"] for update in response.json()["field_updates"]] == ["idea_title"]
+                notice = response.json()["safety_notice"]
                 client_output = response.text
             else:
                 with client.websocket_connect(
@@ -136,7 +156,8 @@ def test_unverified_claims_never_reach_persistence_or_client_events(
                         events.append(event)
                         if event["type"] == "server.source.completed":
                             break
-                assert all(event["type"] != "server.field.updated" for event in events)
+                assert events[-2]["type"] == "server.submission.status"
+                notice = events[-2]["payload"]["safety_notice"]
                 client_output = str(events)
 
         field_state = client.get(f"/api/v1/sessions/{session_id}/fields").json()
@@ -146,8 +167,17 @@ def test_unverified_claims_never_reach_persistence_or_client_events(
             for field in section["fields"]
             if field["field_key"] == "problem_statement"
         )
-        assert "value" not in problem_statement
+        assert problem_statement["value"] == "Existing safe detail"
+        category = next(key for key, value in _ATTACKS.items() if value == claim)
+        assert notice == {
+            "code": "NO_FACTS_REJECTED", "status": "denied", "reason": "NoFacts",
+            "reasons": _REASONS[category],
+        }
+        assert "Workflow helper" in client_output
         assert claim not in client_output
+        assert claim not in caplog.text
+        with app.state.session_factory() as session:
+            assert claim not in list(session.scalars(select(FieldValue.value)))
 
 
 def test_persistence_rejects_ai_updates_without_no_facts_validation() -> None:

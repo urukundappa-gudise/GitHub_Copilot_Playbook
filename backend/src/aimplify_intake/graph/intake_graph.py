@@ -8,6 +8,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from aimplify_intake.graph.pacing import select_next_clarification
+from aimplify_intake.services.extraction import DetailedExtractionResult
 
 
 class IntakeState(TypedDict, total=False):
@@ -16,13 +17,20 @@ class IntakeState(TypedDict, total=False):
     current_values: dict[str, Any]
     field_updates: list[dict[str, str]]
     clarification: dict[str, str] | None
+    safety_notice: dict[str, object] | None
 
 
 def create_intake_graph(
-    extract_safe_values: Callable[[str], list[dict[str, str]]],
+    extract_safe_values: Callable[[str], list[dict[str, str]] | DetailedExtractionResult],
 ) -> Any:
     def extract(state: IntakeState) -> dict[str, Any]:
-        return {"field_updates": extract_safe_values(state["text"])}
+        result = extract_safe_values(state["text"])
+        if isinstance(result, DetailedExtractionResult):
+            return {
+                "field_updates": result.field_updates,
+                "safety_notice": result.safety_notice,
+            }
+        return {"field_updates": result, "safety_notice": None}
 
     def validate(state: IntakeState) -> dict[str, Any]:
         values = dict(state["current_values"])

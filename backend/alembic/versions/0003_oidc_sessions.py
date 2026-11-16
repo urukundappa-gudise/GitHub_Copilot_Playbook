@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0003_oidc_sessions"
-down_revision = "0002_human_only_field_constraints"
+down_revision = "0003_submission_timestamp"
 branch_labels = None
 depends_on = None
 

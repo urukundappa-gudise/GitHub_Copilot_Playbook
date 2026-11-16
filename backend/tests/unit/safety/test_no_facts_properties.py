@@ -1,7 +1,7 @@
 from hypothesis import given
 from hypothesis import strategies as st
 
-from aimplify_intake.safety.no_facts import no_facts_decision
+from aimplify_intake.safety.no_facts import classify_no_facts, no_facts_decision
 
 
 @given(
@@ -37,3 +37,5 @@ def test_nested_normalized_currency_and_date_forms_drop_the_whole_candidate(
     assert no_facts_decision(currency_candidate) == "drop"
     assert no_facts_decision({"nested_claim": currency_candidate}) == "drop"
     assert no_facts_decision(date_candidate) == "drop"
+    assert bool(classify_no_facts(currency_candidate)) == (no_facts_decision(currency_candidate) == "drop")
+    assert bool(classify_no_facts(date_candidate)) == (no_facts_decision(date_candidate) == "drop")

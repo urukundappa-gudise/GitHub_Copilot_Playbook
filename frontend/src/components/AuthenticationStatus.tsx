@@ -1,4 +1,4 @@
-import { AuthUser, signInUrl } from '../services/auth';
+import { AuthUser } from '../services/auth';
 
 type Props = {
   required: boolean;
@@ -27,7 +27,7 @@ export function AuthenticationStatus({ required, loading, user, error }: Props) 
       <div className="authentication-status">
         {error && <p className="error-message" role="alert">{error}</p>}
         {required && (
-          <a className="sign-in-button" href={signInUrl}>
+          <a className="sign-in-button" href="/login">
             Sign in with InfoVision SSO
           </a>
         )}

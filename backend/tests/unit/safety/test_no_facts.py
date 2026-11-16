@@ -1,4 +1,4 @@
-from aimplify_intake.safety.no_facts import no_facts_decision
+from aimplify_intake.safety.no_facts import classify_no_facts, no_facts_decision
 
 
 def test_drops_digit_numerals() -> None:
@@ -34,4 +34,26 @@ def test_drops_entire_nested_candidate_when_any_leaf_has_unverified_quantity() -
 def test_passes_safe_text_without_unverified_quantity() -> None:
     candidate = {"value": "Improves collaboration and review consistency"}
     assert no_facts_decision(candidate) == "pass"
+
+
+def test_classifier_returns_distinct_categories_in_fixed_order() -> None:
+    candidate = {"nested": ["Costs $500 on 2026-11-01", "ninety percent"]}
+    assert classify_no_facts(candidate) == (
+        "number",
+        "percentage",
+        "cost",
+        "date",
+        "word_quantity",
+    )
+
+
+def test_classifier_keeps_percentage_and_number_categories_distinct() -> None:
+    assert classify_no_facts({"value": "Improves efficiency by 20 percent"}) == (
+        "number",
+        "percentage",
+    )
+
+
+def test_classifier_returns_no_categories_for_safe_text() -> None:
+    assert classify_no_facts({"value": "Improves collaboration and review consistency"}) == ()
 

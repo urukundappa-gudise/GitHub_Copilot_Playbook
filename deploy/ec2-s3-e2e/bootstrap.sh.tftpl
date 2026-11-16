@@ -1,0 +1,71 @@
+#!/bin/bash
+set -euo pipefail
+
+exec > >(tee /var/log/aimplify-e2e-bootstrap.log | logger -t user-data -s 2>/dev/console) 2>&1
+
+AWS_REGION='${aws_region}'
+IMAGE_URI='${image_uri}'
+AZURE_AD_TENANT_ID='${azure_ad_tenant_id}'
+AZURE_AD_CLIENT_ID='${azure_ad_client_id}'
+AZURE_AD_REDIRECT_URI='${azure_ad_redirect_uri}'
+AZURE_AD_POST_LOGOUT_REDIRECT_URI='${azure_ad_post_logout_redirect_uri}'
+AZURE_AD_CLIENT_SECRET_ARN='${azure_ad_client_secret_arn}'
+DATABASE_SECRET_ARN='${database_secret_arn}'
+DATABASE_HOST='${database_host}'
+APP_ORIGIN='${app_origin}'
+
+dnf install -y docker
+systemctl enable --now docker
+systemctl enable --now amazon-ssm-agent
+aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$(printf '%s' "$IMAGE_URI" | cut -d/ -f1)"
+docker pull "$IMAGE_URI"
+
+entra_secret="$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$AZURE_AD_CLIENT_SECRET_ARN" --query SecretString --output text)"
+database_secret="$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$DATABASE_SECRET_ARN" --query SecretString --output text)"
+export ENTRA_SECRET="$entra_secret"
+export DATABASE_SECRET="$database_secret"
+export DATABASE_HOST
+export APP_ORIGIN
+export AZURE_AD_TENANT_ID
+export AZURE_AD_CLIENT_ID
+export AZURE_AD_REDIRECT_URI
+export AZURE_AD_POST_LOGOUT_REDIRECT_URI
+
+install -d -m 0700 /run/aimplify
+python3 - <<'PY' > /run/aimplify/runtime.env
+import json
+import os
+from urllib.parse import quote
+
+entra_secret = os.environ["ENTRA_SECRET"]
+database = json.loads(os.environ["DATABASE_SECRET"])
+if "\n" in entra_secret or "\r" in entra_secret:
+    raise SystemExit("Entra client secret contains unsupported newline characters")
+username = quote(database["username"], safe="")
+password = quote(database["password"], safe="")
+host = os.environ["DATABASE_HOST"]
+port = database.get("port", 5432)
+name = database.get("dbname", "aimplify")
+url = f"postgresql+psycopg://{username}:{password}@{host}:{port}/{name}?sslmode=require"
+values = {
+    "APP_ENV": "production",
+    "AUTH_REQUIRED": "true",
+    "AUTH_MOCK_MODE": "false",
+    "APP_ORIGIN": os.environ["APP_ORIGIN"],
+    "ALLOWED_ORIGINS": os.environ["APP_ORIGIN"],
+    "AZURE_AD_TENANT_ID": os.environ["AZURE_AD_TENANT_ID"],
+    "AZURE_AD_CLIENT_ID": os.environ["AZURE_AD_CLIENT_ID"],
+    "AZURE_AD_REDIRECT_URI": os.environ["AZURE_AD_REDIRECT_URI"],
+    "AZURE_AD_POST_LOGOUT_REDIRECT_URI": os.environ["AZURE_AD_POST_LOGOUT_REDIRECT_URI"],
+    "AZURE_AD_CLIENT_SECRET": entra_secret,
+    "DATABASE_URL": url,
+}
+for key, value in values.items():
+    if "\n" in value or "\r" in value:
+        raise SystemExit(f"Runtime setting {key} contains unsupported newline characters")
+    print(f"{key}={value}")
+PY
+unset ENTRA_SECRET DATABASE_SECRET
+chmod 0600 /run/aimplify/runtime.env
+docker run --rm --env-file /run/aimplify/runtime.env --workdir /app/backend "$IMAGE_URI" alembic -c alembic.ini upgrade head
+docker run --detach --restart unless-stopped --name aimplify-api --publish 8000:8000 --env-file /run/aimplify/runtime.env "$IMAGE_URI"

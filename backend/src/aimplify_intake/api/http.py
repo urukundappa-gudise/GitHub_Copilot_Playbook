@@ -37,7 +37,13 @@ def create_human_fields_router(
             if submission is None:
                 raise HTTPException(status_code=404, detail="Session not found.")
             try:
-                saved = persist_human_values(session, submission, {field_key: body.value})
+                saved = persist_human_values(
+                    session,
+                    submission,
+                    {field_key: body.value},
+                    subject_ref=subject,
+                )
+                session.commit()
             except ValueError as error:
                 raise HTTPException(status_code=422, detail="Field value is invalid.") from error
             return {

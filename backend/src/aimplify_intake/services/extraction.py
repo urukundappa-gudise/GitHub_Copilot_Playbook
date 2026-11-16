@@ -4,13 +4,23 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
-from aimplify_intake.safety.no_facts import mark_no_facts_validated, no_facts_decision
+from aimplify_intake.safety.no_facts import (
+    classify_no_facts,
+    mark_no_facts_validated,
+)
 from aimplify_intake.schema.registry import load_canonical_schema
 from aimplify_intake.schema.validation import validate_field_origin, validate_field_value
 
 CandidateExtractor = Callable[[str], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class DetailedExtractionResult:
+    field_updates: list[dict[str, str]]
+    safety_notice: dict[str, object] | None
 
 _LABEL_MAP: dict[str, str] = {
     "full name": "submitter_name",
@@ -110,15 +120,24 @@ def _default_candidate_extractor(text: str) -> dict[str, Any]:
 def extract_safe_candidates(
     text: str, extractor: CandidateExtractor | None = None
 ) -> list[dict[str, str]]:
+    return extract_detailed_candidates(text, extractor).field_updates
+
+
+def extract_detailed_candidates(
+    text: str, extractor: CandidateExtractor | None = None
+) -> DetailedExtractionResult:
     candidates = (extractor or _default_candidate_extractor)(text)
     schema = load_canonical_schema()
     fields = {field["key"]: field for field in schema["fields"]}
     accepted: list[dict[str, str]] = []
+    rejected_reasons: set[str] = set()
     for field_key, candidate in candidates.items():
         field = fields.get(field_key)
         if field is None:
             continue
-        if no_facts_decision(candidate) != "pass":
+        candidate_reasons = classify_no_facts(candidate)
+        if candidate_reasons:
+            rejected_reasons.update(candidate_reasons)
             continue
         try:
             validate_field_origin(field, "ai_extracted")
@@ -130,4 +149,19 @@ def extract_safe_candidates(
                 {"field_key": field_key, "value": value, "origin": "ai_extracted"}
             )
         )
-    return accepted
+    reasons = [
+        reason
+        for reason in ("number", "percentage", "cost", "date", "word_quantity")
+        if reason in rejected_reasons
+    ]
+    notice = (
+        {
+            "code": "NO_FACTS_REJECTED",
+            "status": "denied",
+            "reason": "NoFacts",
+            "reasons": reasons,
+        }
+        if reasons
+        else None
+    )
+    return DetailedExtractionResult(field_updates=accepted, safety_notice=notice)

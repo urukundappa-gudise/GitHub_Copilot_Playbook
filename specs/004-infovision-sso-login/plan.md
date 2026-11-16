@@ -6,27 +6,27 @@
 
 ## Summary
 
-Add InfoVision employee sign-in to the existing React and FastAPI intake application. The backend will use an OIDC client for Entra authorization-code sign-in with S256 PKCE, validated state and nonce, and provider metadata discovery. It will exchange verified claims for a short-lived local application session represented by an opaque `oidc_session` cookie. SQLAlchemy-backed session and one-time login-transaction records preserve the existing `IdentityVerifier` authorization seam while enabling token verification and server-side logout revocation. The frontend will load authenticated identity, show sign-in or account controls, and keep intake disabled until authentication succeeds when `AUTH_REQUIRED=true`.
+Add InfoVision employee sign-in to the existing React and FastAPI intake application. The backend uses an OIDC client for Entra authorization-code sign-in with S256 PKCE, validated state and nonce, and provider metadata discovery. It exchanges verified claims for a short-lived local application session represented by an opaque `oidc_session` cookie. SQLAlchemy-backed session and one-time login-transaction records preserve the existing `IdentityVerifier` authorization seam while enabling token verification and server-side logout revocation. The frontend loads authenticated identity, shows sign-in or account controls, and keeps intake disabled until authentication succeeds when `AUTH_REQUIRED=true`. A separate, temporary EC2/S3 E2E profile validates the same application contract without changing the existing App Runner/ECS roots or their state.
 
 ## Technical Context
 
 **Language/Version**: Python 3.11+; TypeScript 5.7; React 19
 
-**Primary Dependencies**: FastAPI/Starlette, Authlib OIDC client, SQLAlchemy, Alembic, PostgreSQL, React, Vite, Vitest, pytest, AWS Secrets Manager, Terraform
+**Primary Dependencies**: FastAPI/Starlette, Authlib OIDC client, SQLAlchemy, Alembic, PostgreSQL, React, Vite, Vitest, pytest, AWS Secrets Manager, Terraform, S3, CloudFront, EC2, ALB, RDS PostgreSQL, GitHub Actions OIDC
 
-**Storage**: Reuse the configured SQLAlchemy database for short-lived OIDC login transactions and application sessions. Store only a digest of each opaque cookie token; do not persist Entra access or refresh tokens. SQLite remains suitable for local tests; multi-instance deployments require a shared database.
+**Storage**: Reuse the configured SQLAlchemy database for short-lived OIDC login transactions and application sessions. Store only a digest of each opaque cookie token; do not persist Entra access or refresh tokens. SQLite remains suitable for local tests. E2E deployment uses private RDS PostgreSQL for shared state. SQLite is allowed for E2E only with one EC2 instance, one application process, and encrypted persistent EBS; never use in-memory SQLite or S3 as a database for live SSO validation.
 
 **Testing**: pytest for backend OIDC endpoints, identity resolution, session-token verification, auth-required boundaries, and deployment contracts; Vitest and React Testing Library for auth UI/session states; the existing golden evaluation runner for authenticated and unauthenticated access outcomes.
 
-**Target Platform**: Existing Linux FastAPI service and browser-based React frontend, using same-origin authentication redirects in deployment.
+**Target Platform**: Existing Linux FastAPI service and browser-based React frontend, using same-origin authentication redirects. The new isolated E2E profile serves static React assets from private S3 through CloudFront OAC and routes `/api/*` through CloudFront to an HTTPS ALB and private EC2 API. The ALB origin uses a separately registered HTTPS origin name and certificate.
 
 **Project Type**: Existing web application with Python API and TypeScript frontend
 
 **Performance Goals**: At least 95 of 100 valid OIDC callbacks establish a verified application session within two minutes of callback receipt. Validate with a deterministic provider fixture so time spent on user-controlled identity-provider challenges and external provider latency does not affect the measurement.
 
-**Constraints**: Store the Entra client secret in operator-managed AWS Secrets Manager; Terraform carries only its ARN. App Runner receives it through `runtime_environment_secrets` and a dedicated instance role; ECS Express receives it through `primary_container.secret` and its task execution role. Grant each role `secretsmanager:GetSecretValue` only for the configured secret ARN. Keep tenant ID, client ID, callback URL, post-logout URL, `APP_ENV`, and `AUTH_REQUIRED` as non-secret runtime settings. No PII, tokens, authorization codes, or protocol transaction values enter logs. Production requires `AUTH_REQUIRED=true` and complete Entra configuration. Mock identity is available only in explicitly enabled local/test environments with `AZURE_AD_TENANT_ID` unset. The unauthenticated public service must be explicitly configured as `APP_ENV=demo` and must not be presented as production. Session tokens are random, opaque, database-verified, expiring, and revocable. Preserve the existing subject-scoped intake authorization, origin checks, canonical schema, human-only fields, and NoFacts boundaries.
+**Constraints**: Store the Entra client secret in operator-managed AWS Secrets Manager; Terraform carries only its ARN. App Runner, ECS Express, and the E2E EC2 instance use separate runtime roles with secret reads scoped to exact secret ARNs. Keep tenant ID, client ID, callback URL, post-logout URL, `APP_ENV`, and `AUTH_REQUIRED` as non-secret runtime settings. No PII, tokens, authorization codes, or protocol transaction values enter logs. Production requires `AUTH_REQUIRED=true` and complete Entra configuration. Mock identity is available only in explicitly enabled local/test environments with `AZURE_AD_TENANT_ID` unset. The unauthenticated public service must be explicitly configured as `APP_ENV=demo` and must not be presented as production. Session tokens are random, opaque, database-verified, expiring, and revocable. Preserve the existing subject-scoped intake authorization, origin checks, canonical schema, human-only fields, and NoFacts boundaries. E2E infrastructure uses a dedicated Terraform root and unique state key, requires approved DNS/certificates and client CIDRs before apply, and is destroyed within 72 hours. Terraform apply remains operator-triggered; no credentials or real employee data are used by automation.
 
-**Scale/Scope**: One employee identity provider, one local application session per browser sign-in, four authentication operations (login, callback, session status, logout), and the existing intake application. No role/permission administration, account provisioning, Microsoft Graph access, or multi-provider authentication is included.
+**Scale/Scope**: One employee identity provider, one local application session per browser sign-in, four authentication operations (login, callback, session status, logout), and the existing intake application. The temporary E2E profile is single-region, single EC2 instance, one RDS PostgreSQL instance, and one CloudFront distribution. No role/permission administration, account provisioning, Microsoft Graph access, or multi-provider authentication is included.
 
 ## Constitution Check
 
@@ -89,9 +89,23 @@ deploy/bootstrap/variables.tf          # Operator-supplied secret ARN
 deploy/bootstrap/outputs.tf            # App Runner instance-role ARN
 deploy/apprunner/main.tf               # Runtime auth configuration, no inline secrets
 deploy/ecs-express/main.tf             # Runtime auth configuration, no inline secrets
+deploy/ec2-s3-e2e/                      # Isolated, TTL-bounded E2E infrastructure; separate S3 state key
+.github/workflows/e2e-sso-expiry.yml  # Scheduled expiry sweep and Terraform destruction
+backend/tests/contract/test_ec2_s3_e2e_infrastructure.py # Offline deployment contract checks
 ```
 
 **Structure Decision**: Extend the existing FastAPI authentication boundary and SQLAlchemy persistence layer; add a focused frontend authentication component/service and auth contracts/tests. Use a migration for transaction/session records. Do not introduce a separate identity service, new frontend framework, or independent session store.
+
+## E2E Infrastructure Design
+
+- Keep `deploy/ec2-s3-e2e` independent from `deploy/bootstrap`, `deploy/apprunner`, and `deploy/ecs-express`; its remote state uses a unique `e2e-sso/<stack-id>/terraform.tfstate` key in an operator-provided private, versioned state bucket. No existing state key is read or changed.
+- Build the frontend before apply and upload its `dist` tree to a private S3 bucket. CloudFront uses OAC for that bucket, a viewer-request function for SPA paths, a WAF IP allowlist, and an API behavior with caching disabled and the required cookies, headers, query strings, and WebSocket traffic forwarded. API routing uses an HTTPS ALB origin with the externally managed `ai.adlc.infovision.com` hostname; the app origin is `adlc.infovision.com`. Both names use an issued us-east-1 ACM certificate and exact Entra callback/post-logout URIs. The Terraform root outputs CNAME targets but does not manage Infovision DNS records.
+- Place one EC2 application instance in a private subnet behind the ALB. It has no SSH ingress, uses SSM and an instance profile, pulls an immutable ECR image, and reads only the Entra and RDS-managed secret ARNs. Use VPC endpoints for AWS services and one short-lived NAT gateway with API security-group egress restricted to HTTPS for Microsoft OIDC discovery/token calls. Use a private RDS PostgreSQL instance and security-group references; set short backup/log retention appropriate for disposable synthetic data.
+- Require a future expiry no more than 72 hours from apply and tag stack-owned resources with stack ID, owner, and expiry. A CloudFront viewer-request function returns an unavailable response at expiry as a fail-closed access cutoff. A dedicated GitHub Actions OIDC role runs a 15-minute expiry sweep, starts Terraform destruction at hour 68, retries failed destroys, and sends owner alerts. The workflow never receives static AWS keys. Cleanup artifacts and state use only the isolated stack prefix.
+- If the scheduled workflow cannot run, the per-instance expiry timer stops the backend as an additional independent cutoff. The stack is not considered acceptance-complete until a destructive test proves retries remove all stack-owned resources and operator alerts fire. Cloud outages, disabled GitHub Actions, revoked role trust, or retained resources must be surfaced rather than reported as success.
+- Required operator inputs include AWS account/region, a private state bucket and isolated state prefix, confirmation that the Infovision DNS owner can create/remove the two approved CNAMEs, issued ACM certificate ARN, approved client CIDRs, immutable ECR image URI, Entra tenant/client IDs and client-secret ARN, and an owner alert destination. No Terraform apply is performed until these are supplied and reviewed.
+
+The E2E teardown runner depends on GitHub Actions being enabled and its OIDC role remaining valid; it is not an AWS-wide guarantee against account suspension or control-plane outage. Report cleanup failure and keep retrying; never claim resources were destroyed without verifying the exact stack state and tagged-resource inventory.
 
 ## Architecture
 

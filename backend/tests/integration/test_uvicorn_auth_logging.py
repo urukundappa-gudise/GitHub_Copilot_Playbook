@@ -2,9 +2,10 @@ import logging
 
 from aimplify_intake.api.app import create_app
 from aimplify_intake.api.auth import AuthSettings
+from aimplify_intake.observability.logging import UvicornAccessLogQueryFilter
 
 
-def test_uvicorn_access_log_redacts_oidc_callback_query_values(caplog) -> None:
+def test_uvicorn_access_log_redacts_oidc_callback_query_values() -> None:
     create_app(
         database_url="sqlite+pysqlite:///:memory:",
         auth_settings=AuthSettings(
@@ -24,17 +25,26 @@ def test_uvicorn_access_log_redacts_oidc_callback_query_values(caplog) -> None:
         "auth-state-canary",
         "provider-error-canary",
     )
-    caplog.set_level(logging.INFO, logger="uvicorn.access")
-
-    access_logger.info(
-        "%s: %s %s HTTP/%s %s",
-        "127.0.0.1:12345",
-        "GET",
-        "/api/v1/auth/callback?code=auth-code-canary&state=auth-state-canary"
-        "&error=provider-error-canary",
-        "1.1",
-        "302",
+    record = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=0,
+        msg="%s: %s %s HTTP/%s %s",
+        args=(
+            "127.0.0.1:12345",
+            "GET",
+            "/api/v1/auth/callback?code=auth-code-canary&state=auth-state-canary"
+            "&error=provider-error-canary",
+            "1.1",
+            "302",
+        ),
+        exc_info=None,
+    )
+    redaction_filter = next(
+        item for item in access_logger.filters if isinstance(item, UvicornAccessLogQueryFilter)
     )
 
-    assert "/api/v1/auth/callback" in caplog.text
-    assert all(value not in caplog.text for value in sentinels)
+    assert redaction_filter.filter(record)
+    assert "/api/v1/auth/callback" in record.getMessage()
+    assert all(value not in record.getMessage() for value in sentinels)

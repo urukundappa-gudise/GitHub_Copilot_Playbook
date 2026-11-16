@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { IntakeResult } from '../services/intake';
 import { ClarificationPrompt } from './ClarificationPrompt';
 
@@ -11,16 +11,24 @@ export function IntakeChat({ disabled, onSend }: Props) {
   const [text, setText] = useState('');
   const [turns, setTurns] = useState<Array<{ role: 'you' | 'intake'; text: string; clarification?: boolean }>>([]);
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(false);
+  const sending = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const message = text.trim();
-    if (!message || busy) return;
+    if (!message || disabled || sending.current) return;
+    sending.current = true;
     setText('');
     setTurns((current) => [...current, { role: 'you', text: message }]);
     setBusy(true);
     try {
       const result = await onSend(message);
+      if (!mounted.current) return;
       const updates = result.field_updates.map((update) => update.value);
       const reply = result.clarification?.question ?? (updates.length ? 'I have captured the safe details for your submission.' : 'Tell me a little more about the idea.');
       setTurns((current) => [
@@ -29,9 +37,10 @@ export function IntakeChat({ disabled, onSend }: Props) {
         { role: 'intake', text: reply, clarification: Boolean(result.clarification) },
       ]);
     } catch {
-      setTurns((current) => [...current, { role: 'intake', text: 'I could not process that turn. Please try again.' }]);
+      if (mounted.current) setTurns((current) => [...current, { role: 'intake', text: 'I could not process that turn. Please try again.' }]);
     } finally {
-      setBusy(false);
+      sending.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
 

@@ -88,3 +88,41 @@ Required environment: `STAGING_BASE_URL` (HTTPS), `AZURE_AD_TENANT_ID`, `AZURE_A
 - Verify App Runner and ECS Express secret references resolve from AWS Secrets Manager through separate, least-privilege runtime roles.
 - Run the staging smoke script against the approved deployment after a real test-account sign-in; separately confirm secret resolution and IAM scope.
 - Verify every existing intake HTTP route and WebSocket path enforces the active session when `AUTH_REQUIRED=true`.
+
+## Disposable EC2/S3 E2E validation
+
+This is a new, separate deployment profile; it does not reuse or modify App Runner/ECS Terraform state. Read [contracts/e2e-infrastructure.md](contracts/e2e-infrastructure.md) and [deploy/ec2-s3-e2e/README.md](../../deploy/ec2-s3-e2e/README.md) before preparing it.
+
+### Operator prerequisites
+
+- An approved AWS account/region, a private versioned encrypted Terraform state bucket, and repository OIDC plan/cleanup roles. The cleanup role must be restricted to the E2E prefixes, resource scope, protected default branch, and external alert topic.
+- Entra app registration permissions for the exact `https://<app-domain>/api/v1/auth/callback` and `https://<app-domain>/` post-logout URI. Store the client secret in AWS Secrets Manager; use only its ARN in configuration.
+- Existing Infovision DNS management for `adlc.infovision.com` and `ai.adlc.infovision.com`, an issued us-east-1 ACM certificate covering both hostnames, approved client CIDRs, a full-SHA ECR image, and an external SNS owner-alert topic. Terraform does not manage Infovision DNS records.
+- GitHub Actions scheduled workflows enabled and the variables documented in the deployment README. If a prerequisite or permission is missing, stop before Terraform apply and give the operator the exact missing item.
+
+### Prepare and review
+
+1. Copy `deploy/ec2-s3-e2e/terraform.tfvars.example.json` to a protected local JSON file. Use `adlc.infovision.com` and `ai.adlc.infovision.com`; replace example IDs/ARNs with approved non-secret values and secret ARNs only. Never include an Entra secret, RDS password, access key, or token.
+2. Authenticate with the approved AWS IAM Identity Center profile and register the expiry manifest before apply:
+
+```powershell
+aws sso login --profile <approved-operator-profile>
+$env:AWS_PROFILE = '<approved-operator-profile>'
+.\scripts\e2e-sso-prepare.ps1 -ConfigPath 'C:\secure\e2e-sso-vars.json' -StateBucketName '<private-state-bucket>'
+```
+
+The script validates private access, versioning, encryption, AWS identity, and region; creates the unique state key and 72-hour expiry; and writes only non-secret settings and secret ARNs to the registry. It does not apply Terraform.
+
+3. Initialize the isolated root with `e2e-sso/stacks/<stack-id>/terraform.tfstate`, then run `terraform fmt -check`, `terraform validate`, and `terraform plan -var-file <temp-dir>\terraform.tfvars.json`. Review the exact resources, DNS/certificates, CIDRs, IAM, NAT cost, secret ARNs, and cleanup role. The GitHub workflow `e2e-sso-plan.yml` is plan-only.
+4. An authorized operator must explicitly approve the reviewed plan before applying it. If approval or infrastructure permissions are unavailable, do not apply or expose the endpoint.
+5. After apply, run `npm ci --prefix frontend` and `npm run build --prefix frontend`, upload only `frontend/dist` to the output private frontend bucket, and invalidate the CloudFront distribution. Give the DNS owner the `app_dns_cname_target` and `api_dns_cname_target` outputs and have them create CNAMEs for `adlc.infovision.com` and `ai.adlc.infovision.com` in the existing Infovision DNS provider. The EC2 bootstrap retrieves secrets from Secrets Manager, runs `alembic upgrade head` on the private PostgreSQL database, and starts the immutable API image.
+
+### Live validation and teardown proof
+
+1. Confirm `/health/live` through the HTTPS app hostname and confirm the API origin is reachable only through CloudFront from approved CIDRs.
+2. Sign in with an approved test account. Verify state/nonce/S256 PKCE, claim validation, `oid` ownership, callback query forwarding, no API caching, and the secure opaque session cookie.
+3. Submit an intake, sign out, and verify local revocation before Entra logout. Exercise callback replay, mismatched state/nonce, missing claims, and unauthenticated API/WebSocket requests; each must fail closed.
+4. Verify the scheduled EC2 stop at hour 68, the CloudFront 503 expiry at hour 72, and cleanup workflow destruction. For the failure test, make one isolated cleanup attempt fail safely, observe owner alert and retry, then confirm the complete AWS resource inventory is removed.
+5. Have the external DNS owner remove the two CNAMEs no later than the 72-hour deadline; DNS cleanup is not automated by Terraform/GitHub Actions. Record sanitized evidence, keep Terraform state and CI evidence for audit, and confirm no AWS stack resources or expiry manifest remain.
+
+The EC2 stop and CloudFront expiry prevent continued use, but do not alone guarantee AWS resource deletion. The 72-hour destruction criterion remains open until the approved isolated teardown and forced-failure tests pass. Do not use shared or production resources for the failure test.

@@ -1,6 +1,6 @@
 # Feature Specification: InfoVision SSO Login
 
-**Feature Branch**: `Not created (no branch hook is configured)`
+**Feature Branch**: `feat/004-infovision-sso-e2e-infra`
 
 **Created**: 2026-11-13
 
@@ -57,6 +57,24 @@ An operator enables required authentication so unauthenticated users cannot acce
 3. **Given** a local development or unit-test environment has no `AZURE_AD_TENANT_ID`, **When** a test uses the explicitly enabled mock mode, **Then** it can exercise authentication-dependent behavior without contacting Entra ID.
 4. **Given** an authentication attempt succeeds or fails, **When** its application logs are inspected, **Then** logs contain no PII, cookies, tokens, authorization codes, callback query strings, state, nonce, or PKCE values.
 
+---
+
+### User Story 4 - Validate SSO in a Disposable AWS Environment (Priority: P1)
+
+An operator validates the complete Entra sign-in and sign-out journey using an isolated AWS environment with the frontend delivered through private S3/CloudFront and the API on EC2.
+
+**Why this priority**: The application must be exercised through its actual HTTPS, cookie, callback, and shared-session database paths without modifying the existing App Runner/ECS deployments or leaving temporary infrastructure running indefinitely.
+
+**Independent Test**: Apply an isolated stack using approved AWS and Entra configuration, complete the live SSO checks, then verify the stack is fully destroyed no later than 72 hours after creation, including when the primary cleanup attempt fails.
+
+**Acceptance Scenarios**:
+
+1. **Given** an approved E2E deployment, **When** the employee opens the registered HTTPS frontend origin, **Then** CloudFront serves the React assets from a private S3 bucket and routes API/auth requests to the EC2 FastAPI service through HTTPS.
+2. **Given** the E2E deployment is active, **When** an employee completes sign-in and sign-out, **Then** the existing OIDC/session contract remains unchanged and shared session state uses PostgreSQL; SQLite is allowed only for a single-instance, single-process test deployment on encrypted persistent EBS.
+3. **Given** an E2E stack is created, **When** its 68-hour cleanup deadline is reached, **Then** an automated cleanup runner begins Terraform destruction, retries failures, and sends an owner alert for incomplete cleanup.
+4. **Given** the normal cleanup runner is unavailable or has not completed by the 72-hour deadline, **When** the independent expiry control runs, **Then** the application is made inaccessible and the cleanup runner continues retrying until all stack-owned resources are removed.
+5. **Given** a required Entra registration, AWS permission, domain, certificate, or cleanup control is unavailable, **When** deployment preparation runs, **Then** it reports the precise operator prerequisite and does not apply Terraform or expose an endpoint.
+
 ### Edge Cases
 
 - The identity provider returns an error, the employee cancels sign-in, or the callback is missing required values.
@@ -84,6 +102,10 @@ An operator enables required authentication so unauthenticated users cannot acce
 - **FR-010**: Automated acceptance coverage MUST exercise frontend authentication states with Vitest, backend OIDC endpoint behavior with Pytest, and the `oidc_session` token-verification contract. Each acceptance scenario in this specification MUST be covered by an automated check.
 - **FR-011**: The golden evaluation suite MUST include authenticated and unauthenticated intake access outcomes under the required-authentication policy, and all applicable cases MUST pass.
 - **FR-012**: Authentication logs MUST exclude personally identifiable information and all cookies, tokens, authorization codes, callback query strings, state, nonce, and PKCE values. Authentication events MAY log only a generic outcome category and request correlation ID.
+- **FR-013**: The project MUST provide a separate E2E deployment profile with a private S3 frontend origin protected by CloudFront OAC and a FastAPI backend on EC2 behind an HTTPS load balancer. This profile MUST NOT modify the existing App Runner/ECS deployments or their Terraform state.
+- **FR-014**: E2E deployments MUST use PostgreSQL for shared OIDC transaction/session state. SQLite MAY be used only for a single-instance, single-process validation with encrypted persistent EBS; in-memory SQLite and S3-backed SQLite MUST NOT be used for live SSO validation.
+- **FR-015**: Every E2E deployment MUST have a unique Terraform state key and expiry metadata. Automated cleanup MUST begin no later than 68 hours after creation, retry failures, notify the owner, and use an independent fail-closed expiry control so the application is inaccessible by 72 hours and all stack-owned resources are removed within 72 hours. Cleanup MUST NOT target shared infrastructure.
+- **FR-016**: E2E deployment preparation MUST fail before apply when required Entra registration, AWS permissions, DNS/TLS configuration, database secret access, or expiry controls are missing. Real credential values MUST NOT be passed in command arguments, Terraform variables/state, source, or logs.
 
 ### Key Entities *(include if data involved)*
 
@@ -101,6 +123,7 @@ An operator enables required authentication so unauthenticated users cannot acce
 - **SC-004**: After a successful logout, 100% of subsequent protected actions require a new authenticated session.
 - **SC-005**: All specified frontend, backend, token-verification contract, and golden-evaluation cases pass before release, with no Azure credential values exposed in repository files or application logs.
 - **SC-006**: In an acceptance session with 10 InfoVision employees who did not participate in feature design and have not received app-specific orientation, at least 9 can identify which account is signed in and locate the sign-out action without assistance.
+- **SC-007**: An isolated E2E stack passes the HTTPS Entra sign-in, authorization, logout, and negative-path checks and is inaccessible and fully destroyed within 72 hours; a forced primary-cleanup failure is recovered by the independent expiry control and recorded as sanitized evidence.
 
 ## Assumptions
 

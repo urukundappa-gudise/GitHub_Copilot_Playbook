@@ -5,6 +5,9 @@ type Props = {
   sessionId: string;
   fields: IntakeFieldState[];
   onSaved: (update: HumanFieldUpdate) => void;
+  disabled?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
 };
 
 const FIELD_KEYS = {
@@ -18,7 +21,14 @@ function savedValues(fields: IntakeFieldState[]): Map<string, string> {
   return new Map(fields.map((field) => [field.field_key, field.value ?? '']));
 }
 
-export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
+export function HumanDeclarations({
+  sessionId,
+  fields,
+  onSaved,
+  disabled = false,
+  onDirtyChange,
+  onBusyChange,
+}: Props) {
   const initialValues = savedValues(fields);
   const [accepted, setAccepted] = useState(
     initialValues.get(FIELD_KEYS.accepted) === 'true',
@@ -29,6 +39,25 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const previousValues = useRef(initialValues);
+  const mounted = useRef(false);
+  const saving = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const dirty =
+    accepted !== (initialValues.get(FIELD_KEYS.accepted) === 'true') ||
+    signature !== (initialValues.get(FIELD_KEYS.signature) ?? '') ||
+    date !== (initialValues.get(FIELD_KEYS.date) ?? '') ||
+    notes !== (initialValues.get(FIELD_KEYS.notes) ?? '');
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
   useEffect(() => {
     const currentValues = savedValues(fields);
@@ -50,32 +79,45 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
 
   async function saveDeclaration(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (disabled || saving.current) return;
+    saving.current = true;
     setBusy(true);
     setError('');
     try {
-      const updates = await Promise.all([
+      const updates = await Promise.allSettled([
         saveHumanField(sessionId, FIELD_KEYS.accepted, accepted),
         saveHumanField(sessionId, FIELD_KEYS.signature, signature),
         saveHumanField(sessionId, FIELD_KEYS.date, date),
       ]);
-      updates.forEach(onSaved);
+      if (!mounted.current) return;
+      for (const result of updates) {
+        if (result.status === 'fulfilled') onSaved(result.value);
+      }
+      if (updates.some((result) => result.status === 'rejected')) {
+        setError('Your declaration could not be fully saved. Please try again.');
+      }
     } catch {
-      setError('Your declaration could not be saved. Please try again.');
+      if (mounted.current) setError('Your declaration could not be saved. Please try again.');
     } finally {
-      setBusy(false);
+      saving.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
 
   async function saveNotes(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (disabled || saving.current) return;
+    saving.current = true;
     setBusy(true);
     setError('');
     try {
-      onSaved(await saveHumanField(sessionId, FIELD_KEYS.notes, notes));
+      const update = await saveHumanField(sessionId, FIELD_KEYS.notes, notes);
+      if (mounted.current) onSaved(update);
     } catch {
-      setError('Your reviewer notes could not be saved. Please try again.');
+      if (mounted.current) setError('Your reviewer notes could not be saved. Please try again.');
     } finally {
-      setBusy(false);
+      saving.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -91,6 +133,7 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
             type="checkbox"
             required
             checked={accepted}
+            disabled={disabled || busy}
             onChange={(event) => setAccepted(event.target.checked)}
           />
           <span>Declaration Accepted</span>
@@ -103,6 +146,7 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
           autoComplete="name"
           required
           value={signature}
+          disabled={disabled || busy}
           onChange={(event) => setSignature(event.target.value)}
         />
         <label className="human-field-label" htmlFor="date-of-submission">Date of Submission</label>
@@ -112,9 +156,10 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
           type="date"
           required
           value={date}
+          disabled={disabled || busy}
           onChange={(event) => setDate(event.target.value)}
         />
-        <button className="human-save-button" type="submit" disabled={busy}>
+        <button className="human-save-button" type="submit" disabled={disabled || busy}>
           Save Declaration
         </button>
       </form>
@@ -126,9 +171,10 @@ export function HumanDeclarations({ sessionId, fields, onSaved }: Props) {
           rows={3}
           maxLength={4000}
           value={notes}
+          disabled={disabled || busy}
           onChange={(event) => setNotes(event.target.value)}
         />
-        <button className="human-save-button secondary" type="submit" disabled={busy || !notes.trim()}>
+        <button className="human-save-button secondary" type="submit" disabled={disabled || busy || !notes.trim()}>
           Save Reviewer Notes
         </button>
       </form>

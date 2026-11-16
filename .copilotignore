@@ -2,6 +2,10 @@
 **/.env*
 !.env.example
 !**/.env.example
+.local
+*.local
+.aws/
+.gcp/
 .azure/
 **/.azure/
 .azureauth/
@@ -46,3 +50,11 @@ msal_token_cache*
 **/*.sqlite3
 **/*.sqlite3-*
 **/*.sqlite3*
+*.cert
+*credentials*.json
+*token*.json
+oidc-trust.json
+node_modules/
+.venv/
+dist/
+build/

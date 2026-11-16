@@ -1,0 +1,21 @@
+function handler(event) {
+  var request = event.request;
+  if (Date.now() >= Date.parse("${expires_at}")) {
+    return {
+      statusCode: 503,
+      statusDescription: "E2E environment expired",
+      headers: {
+        "cache-control": { value: "no-store" },
+        "content-type": { value: "text/plain; charset=utf-8" }
+      },
+      body: {
+        encoding: "text",
+        data: "This temporary E2E environment has expired."
+      }
+    };
+  }
+  if (request.uri.indexOf("/api/") !== 0 && request.uri.indexOf("/health/") !== 0 && request.uri.indexOf(".") === -1) {
+    request.uri = "/index.html";
+  }
+  return request;
+}
