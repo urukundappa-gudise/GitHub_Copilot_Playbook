@@ -204,3 +204,18 @@ T026 backend/tests/integration/test_auth_required.py
 - [ ] T047 Provide an approved reachable PostgreSQL database and validate the full Alembic chain through `0003_oidc_sessions` with recorded results per T036 and plan: PostgreSQL storage (partial).
 - [ ] T048 Conduct the unassisted usability acceptance with 10 eligible InfoVision employees and record aggregate results meeting the 9-of-10 threshold per T032, T037, T041, and SC-006 (missing).
 - [ ] T049 Run the PostgreSQL CI migration gate and complete all remaining release checks for the reviewed deployment before declaring release readiness per T033 and SC-005 (partial).
+
+## Phase 11: Disposable EC2/S3 E2E Environment
+
+**Purpose**: Add a separately state-isolated AWS deployment profile for live Entra validation, with explicit operator prerequisites and bounded lifetime. Do not apply this stack without operator approval.
+
+- [X] T050 Fix `scripts/agent-worktree.ps1` to copy `.specify` and `specs` contents into an existing worktree without creating nested duplicate directories; validate PowerShell syntax and copy behavior.
+- [X] T051 Extend this specification with the EC2/S3 E2E story, PostgreSQL/SQLite boundary, operator prerequisites, and 72-hour expiry acceptance per FR-013 through FR-016 and SC-007.
+- [X] T052 Update `plan.md` with the isolated EC2/S3/CloudFront/ALB/RDS topology, unique Terraform state, TTL controls, and required operator inputs per FR-013 through FR-016.
+- [X] T053 Add `contracts/e2e-infrastructure.md` specifying private S3 OAC, HTTPS CloudFront-to-ALB routing, cookie/query forwarding, WAF allowlist, EC2/DB security groups, secret ARN scope, unique state key, expiry, retry, alert, external Infovision DNS CNAME ownership, and teardown evidence per FR-013 through FR-016.
+- [X] T054 Create a separate `deploy/ec2-s3-e2e/` Terraform root for the single-region temporary deployment; do not modify App Runner/ECS resources or their state; output CNAME targets for externally managed Infovision DNS per FR-013 through FR-016.
+- [X] T055 Add an expiry manifest, 15-minute teardown sweeper, hour-68 Terraform destroy with retry/owner alert, and independent fail-closed expiry cutoff; verify each stack can only destroy its own state/resources per FR-015 and SC-007.
+- [X] T056 Add offline Terraform contract tests for private origins, TLS, routing/cookies, security-group scope, Secrets Manager ARNs, PostgreSQL persistence, TTL limit, and teardown workflow permissions; include the new Terraform root in CI validation per FR-013 through FR-016.
+- [X] T057 Update `quickstart.md` with exact Entra/AWS/DNS/certificate/image/state-bucket prerequisites, apply/verification/teardown steps, credential safety, and explicit no-apply gate per FR-016 and SC-007.
+- [X] T058 Run feature-focused Pytest/Vitest, full backend/frontend checks, golden evaluation, Terraform fmt/init/validate, and deployment contract tests; document unavailable live staging or AWS checks without claiming success per SC-005 and SC-007.
+- [ ] T059 Obtain approved AWS account/region, Entra registration, app/API domains and certificates, allowed client CIDRs, ECR image, state bucket, and owner alert destination; review a plan and obtain explicit apply approval before provisioning per FR-016 and SC-007.

@@ -5,6 +5,7 @@ import { OutcomeDialog } from './components/OutcomeDialog';
 import { SafetyDenialBanner } from './components/SafetyDenialBanner';
 import { SourcePicker } from './components/SourcePicker';
 import { AuthenticationStatus } from './components/AuthenticationStatus';
+import { LoginPage } from './components/LoginPage';
 import {
   connectIntakeSocket,
   decodeSubmissionReceipt,
@@ -34,6 +35,12 @@ const HUMAN_ONLY_FIELD_KEYS = new Set([
 ]);
 
 export default function App() {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (path === '/login') return <LoginPage />;
+  return <IntakeApplication />;
+}
+
+function IntakeApplication() {
   type Lifecycle = 'editing' | 'submitting' | 'outcome_unknown' | 'confirmed' | 'starting_fresh' | 'fresh_start_failed';
   type NoticeEntry = {
     key: string;
@@ -107,7 +114,6 @@ export default function App() {
     mountedRef.current = true;
     const frames = focusFrames.current;
     let active = true;
-    let closeSocket: (() => void) | undefined;
     async function bootstrap() {
       let authResolved = false;
       try {

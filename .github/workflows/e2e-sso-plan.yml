@@ -1,0 +1,66 @@
+name: E2E SSO Terraform Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack_id:
+        description: Registered isolated E2E stack identifier
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.E2E_AWS_REGION }}
+      STATE_BUCKET: ${{ vars.E2E_STATE_BUCKET }}
+      STACK_ID: ${{ inputs.stack_id }}
+    steps:
+      - name: Check out protected default branch
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials with repository OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_E2E_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.E2E_AWS_REGION }}
+          role-session-name: e2e-sso-plan-${{ github.run_id }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+
+      - name: Plan the registered stack without applying
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${AWS_REGION:?E2E_AWS_REGION repository variable is required}"
+          : "${STATE_BUCKET:?E2E_STATE_BUCKET repository variable is required}"
+          [[ "$STACK_ID" =~ ^[a-z0-9][a-z0-9-]{2,23}$ ]]
+          state_key="e2e-sso/stacks/${STACK_ID}/terraform.tfstate"
+          registry_key="e2e-sso/registry/${STACK_ID}.json"
+          aws s3 cp "s3://${STATE_BUCKET}/${registry_key}" "$RUNNER_TEMP/manifest.json" --only-show-errors
+          jq -e --arg id "$STACK_ID" --arg key "$state_key" --arg bucket "$STATE_BUCKET" \
+            '.stack_id == $id and .state_key == $key and .variables.stack_id == $id and .variables.state_key == $key and .variables.state_bucket_name == $bucket' \
+            "$RUNNER_TEMP/manifest.json" >/dev/null
+          jq '.variables' "$RUNNER_TEMP/manifest.json" > "$RUNNER_TEMP/terraform.tfvars.json"
+          terraform -chdir=deploy/ec2-s3-e2e init -input=false \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="key=${state_key}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="use_lockfile=true" \
+            -lockfile=readonly
+          terraform -chdir=deploy/ec2-s3-e2e validate
+          terraform -chdir=deploy/ec2-s3-e2e plan -input=false -no-color \
+            -var-file="$RUNNER_TEMP/terraform.tfvars.json"
+          echo "Plan only: no Terraform apply was run. Require a separate reviewed operator approval before apply."

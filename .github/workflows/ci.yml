@@ -179,6 +179,7 @@ jobs:
           terraform fmt -check -recursive deploy/bootstrap
           terraform fmt -check -recursive deploy/apprunner
           terraform fmt -check -recursive deploy/ecs-express
+          terraform fmt -check -recursive deploy/ec2-s3-e2e
 
       - name: Validate bootstrap Terraform
         working-directory: deploy/bootstrap
@@ -194,6 +195,12 @@ jobs:
 
       - name: Validate ECS Express Terraform
         working-directory: deploy/ecs-express
+        run: |
+          terraform init -backend=false -input=false -lockfile=readonly
+          terraform validate
+
+      - name: Validate disposable E2E Terraform
+        working-directory: deploy/ec2-s3-e2e
         run: |
           terraform init -backend=false -input=false -lockfile=readonly
           terraform validate

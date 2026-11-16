@@ -167,3 +167,41 @@ h2 { margin-bottom: 0; font-family: Georgia, 'Times New Roman', serif; font-size
   .safety-denial-actions button, .outcome-dialog-actions button { flex: 1 1 135px; }
   .submit-action { width: 100%; }
 }
+
+.login-page { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); background: var(--paper); }
+.login-story { position: relative; min-height: 100vh; display: flex; flex-direction: column; justify-content: space-between; gap: 48px; overflow: hidden; padding: 38px clamp(28px, 6vw, 88px); color: #f5f7f2; background-color: #183b34; background-image: repeating-linear-gradient(135deg, transparent 0 42px, #ffffff08 42px 43px); }
+.login-brand { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 12px; align-self: flex-start; color: inherit; text-decoration: none; font-size: 13px; font-weight: 800; letter-spacing: 0.06em; }
+.login-brand small { display: block; margin-top: 3px; color: #b7c9bd; font-size: 9px; font-weight: 700; }
+.login-brand-mark, .login-glyph { display: grid; place-items: center; flex: 0 0 auto; width: 42px; height: 42px; border: 1px solid #9ab6a7; border-radius: 50%; color: #173a33; background: #dcebe1; font-family: Georgia, 'Times New Roman', serif; font-size: 19px; font-weight: 700; }
+.login-story-copy { position: relative; z-index: 1; width: min(100%, 520px); margin: auto 0; }
+.login-eyebrow { margin: 0 0 18px; color: #a9cdb8; font-size: 10px; font-weight: 800; letter-spacing: 0.15em; }
+.login-story-copy h1 { max-width: 480px; margin: 0 0 18px; color: #f7f7ef; font-family: Georgia, 'Times New Roman', serif; font-size: 42px; font-weight: 500; line-height: 1.12; }
+.login-story-copy > p:last-child { max-width: 390px; margin: 0; color: #c1d0c7; font-size: 14px; line-height: 1.65; }
+.login-story-foot { position: relative; z-index: 1; margin: 0; color: #a9c0b4; font-size: 9px; font-weight: 700; letter-spacing: 0.12em; }
+.login-content { min-width: 0; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; padding: 38px clamp(28px, 6vw, 88px) 18px; }
+.login-content-inner { width: min(100%, 410px); margin: auto; }
+.login-glyph { width: 48px; height: 48px; margin-bottom: 30px; border-color: #c5d6ca; color: var(--green); background: var(--green-soft); }
+.login-content .eyebrow { margin-bottom: 10px; }
+.login-content h2 { margin: 0 0 10px; color: var(--ink); font-family: Georgia, 'Times New Roman', serif; font-size: 31px; font-weight: 500; }
+.login-copy { margin: 0 0 24px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.login-sso-button { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 15px; border: 1px solid #176f5d; border-radius: 4px; color: white; background: var(--green); text-decoration: none; font-size: 12px; font-weight: 800; transition: background 150ms, transform 150ms; }
+.login-sso-button:hover { transform: translateY(-1px); background: #105544; }
+.login-sso-button:focus-visible { outline: 3px solid #d6aa52; outline-offset: 3px; }
+.login-arrow { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid #ffffff78; border-radius: 50%; font-size: 13px; }
+.login-content .error-message { margin: 0 0 16px; }
+.login-assurance { margin: 16px 0 0; color: #74837b; font-size: 10px; line-height: 1.55; }
+.login-footer { width: min(100%, 410px); margin: auto auto 0; padding-top: 20px; display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); color: #829087; font-size: 9px; }
+.login-footer span:first-child { font-weight: 800; letter-spacing: 0.08em; }
+@media (max-width: 760px) {
+  .login-page { grid-template-columns: 1fr; }
+  .login-story { min-height: 0; gap: 34px; padding: 24px 24px 30px; }
+  .login-story-copy { margin: 12px 0 0; }
+  .login-story-copy h1 { max-width: 430px; font-size: 34px; }
+  .login-content { min-height: 520px; padding: 35px 24px 20px; }
+  .login-footer { width: min(100%, 410px); }
+}
+@media (max-width: 420px) {
+  .login-story-copy h1 { font-size: 30px; }
+  .login-content h2 { font-size: 27px; }
+  .login-footer { flex-wrap: wrap; }
+}

@@ -35,7 +35,7 @@ describe('authentication status', () => {
     );
     expect(
       screen.getByRole('link', { name: /sign in with infovision sso/i }),
-    ).toHaveAttribute('href', '/api/v1/auth/login');
+    ).toHaveAttribute('href', '/login');
 
     rerender(
       <AuthenticationStatus
@@ -73,6 +73,27 @@ describe('authentication status', () => {
       'method',
       'post',
     );
+  });
+});
+
+describe('Entra login route', () => {
+  afterEach(() => {
+    window.history.replaceState({}, '', '/');
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('renders the login page and redirects through the backend OIDC route', () => {
+    window.history.replaceState({}, '', '/login?auth=error');
+    render(<App />);
+
+    expect(screen.getByRole('heading', { name: /sign in to aimplify/i })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/could not be completed/i);
+    expect(
+      screen.getByRole('link', { name: /continue with infovision sso/i }),
+    ).toHaveAttribute('href', '/api/v1/auth/login');
+    expect(screen.queryByRole('textbox', { name: /message/i })).not.toBeInTheDocument();
+    expect(getAuthSession).not.toHaveBeenCalled();
   });
 });
 

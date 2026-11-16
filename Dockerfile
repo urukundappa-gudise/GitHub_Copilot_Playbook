@@ -19,6 +19,8 @@ ENV PATH="/app/backend/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY --from=backend-build /app/backend/.venv /app/backend/.venv
+COPY backend/alembic.ini /app/backend/alembic.ini
+COPY backend/alembic /app/backend/alembic
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app \
     && chown -R app:app /app

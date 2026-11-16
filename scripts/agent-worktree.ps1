@@ -28,10 +28,22 @@ if (Test-Path $WorktreeDir) {
 
 # Propagate Spec Kit memory and specs so Copilot retains project context
 if (Test-Path "$RepoRoot\.specify") {
-    Copy-Item -Path "$RepoRoot\.specify" -Destination "$WorktreeDir\.specify" -Recurse -Force
+    $specifyDestination = Join-Path $WorktreeDir ".specify"
+    if (-not (Test-Path $specifyDestination)) {
+        New-Item -ItemType Directory -Path $specifyDestination -Force | Out-Null
+    }
+    Get-ChildItem -LiteralPath "$RepoRoot\.specify" -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $specifyDestination -Recurse -Force
+    }
 }
 if (Test-Path "$RepoRoot\specs") {
-    Copy-Item -Path "$RepoRoot\specs" -Destination "$WorktreeDir\specs" -Recurse -Force
+    $specsDestination = Join-Path $WorktreeDir "specs"
+    if (-not (Test-Path $specsDestination)) {
+        New-Item -ItemType Directory -Path $specsDestination -Force | Out-Null
+    }
+    Get-ChildItem -LiteralPath "$RepoRoot\specs" -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $specsDestination -Recurse -Force
+    }
 }
 
 Write-Host "==> Worktree ready at: $WorktreeDir" -ForegroundColor Green
