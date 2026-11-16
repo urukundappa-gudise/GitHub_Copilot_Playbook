@@ -19,7 +19,10 @@ def test_express_demo_configuration() -> None:
     assert "auto_scaling_target_value = 60" in service
     assert 'name  = "AUTH_REQUIRED"' in service
     assert 'value = "false"' in service
-    assert "DATABASE_URL" not in service
+    assert 'DATABASE_URL' in service
+    assert "var.database_url_secret_arn" in service
+    assert 'name  = "APP_ORIGIN"' in service
+    assert "var.app_origin" in service
     assert "prevent_destroy = true" in service
     assert "subnets = var.subnet_ids" in service
     assert "${var.image_tag}" in service
@@ -52,3 +55,19 @@ def test_express_pipeline_is_main_only_and_runs_after_image_push() -> None:
     assert "-lockfile=readonly" in workflow
     assert "/health/live" in workflow
     assert "aws apprunner" not in workflow
+
+
+def test_express_production_wires_database_secret_and_origin_without_secret_values() -> None:
+    service = _read("deploy/ecs-express/main.tf")
+    bootstrap = _read("deploy/bootstrap/ecs.tf")
+    variables = _read("deploy/ecs-express/variables.tf")
+    workflow = _read(".github/workflows/cd.yml")
+    assert "var.database_url_secret_arn != null" in service
+    assert "trimspace(var.app_origin)" in service
+    assert 'variable "database_url_secret_arn"' in variables
+    assert 'variable "app_origin"' in variables
+    assert "secretsmanager:GetSecretValue" in bootstrap
+    assert "var.database_url_secret_arn" in bootstrap
+    assert "vars.DATABASE_URL_SECRET_ARN" in workflow
+    assert "vars.APP_ORIGIN" in workflow
+    assert "-var=\"database_url_secret_arn=${DATABASE_URL_SECRET_ARN}\"" in workflow

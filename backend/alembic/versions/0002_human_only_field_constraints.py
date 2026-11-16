@@ -18,7 +18,13 @@ depends_on = None
 
 def upgrade() -> None:
     if op.get_bind().dialect.name == "postgresql":
-        op.alter_column("alembic_version", "version_num", type_=sa.String(64))
+        op.alter_column(
+            "alembic_version",
+            "version_num",
+            existing_type=sa.String(32),
+            type_=sa.String(64),
+            existing_nullable=False,
+        )
     with op.batch_alter_table("canonical_field_definitions") as batch_op:
         batch_op.create_check_constraint(
             "ck_declaration_fields_not_ai_writable",

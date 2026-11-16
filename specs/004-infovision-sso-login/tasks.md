@@ -180,7 +180,8 @@ T026 backend/tests/integration/test_auth_required.py
 
 - [X] T034 Redact or suppress Uvicorn access-log query strings for `/api/v1/auth/callback` and add a runtime log regression test covering code, state, and provider-error sentinels per FR-012 (contradicts).
 - [ ] T035 Run staged Entra sign-in/logout and required-auth failure scenarios, including secret resolution and IAM scope, and record only sanitized outcomes per SC-005 and T033 (partial).
-- [ ] T036 Validate the complete Alembic chain from an empty PostgreSQL database through `0003_oidc_sessions` per plan: PostgreSQL storage decision and T033 (partial).
+- [X] T036 Validate the complete Alembic chain from an empty PostgreSQL database through `0003_oidc_sessions` per plan: PostgreSQL storage decision and T033 (partial).
+  - Evidence: [CI run 43420334285](https://github.com/urukundappa-gudise/GitHub_Copilot_Playbook/actions/runs/43420334285) passed the PostgreSQL 16 migration job for commit `b314370db499dd5bb56dbabbb31205d6df53b445`. This verifies the ephemeral CI database, not staging database availability or migration.
 - [ ] T037 Conduct the usability acceptance with 10 eligible InfoVision employees, record aggregate results only, and require at least 9 successful outcomes per SC-006 (missing).
 - [X] T038 Pass the runtime identity verifier into `create_app` during ASGI entrypoint construction and add entrypoint wiring/fail-closed tests per plan: authentication boundaries and T009 (partial).
 
@@ -196,3 +197,10 @@ T026 backend/tests/integration/test_auth_required.py
 - [X] T043 Add an empty PostgreSQL CI service that runs the Alembic chain through `0003_oidc_sessions` and gates release evaluation per T036.
 - [X] T044 Add a post-deployment smoke script for live Entra discovery, authorization configuration, verified session resolution, and logout without exposing session values per T035.
 - [X] T045 Verify that CI exports the aggregate-only synthetic persona results and fails release evaluation if the PostgreSQL migration job fails per T033.
+
+## Phase 10: Convergence
+
+- [ ] T046 Deploy the approved feature to staging and verify CloudFront routing and safe logging, Entra sign-in/logout, required-auth failures, secret resolution, and least-privilege IAM with sanitized evidence per T035, FR-001, and FR-012 (partial).
+- [ ] T047 Provide an approved reachable PostgreSQL database and validate the full Alembic chain through `0003_oidc_sessions` with recorded results per T036 and plan: PostgreSQL storage (partial).
+- [ ] T048 Conduct the unassisted usability acceptance with 10 eligible InfoVision employees and record aggregate results meeting the 9-of-10 threshold per T032, T037, T041, and SC-006 (missing).
+- [ ] T049 Run the PostgreSQL CI migration gate and complete all remaining release checks for the reviewed deployment before declaring release readiness per T033 and SC-005 (partial).

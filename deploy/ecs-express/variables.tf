@@ -55,6 +55,18 @@ variable "azure_ad_client_secret_arn" {
   default     = null
 }
 
+variable "database_url_secret_arn" {
+  description = "Secrets Manager ARN containing the complete database URL as a raw string."
+  type        = string
+  default     = null
+}
+
+variable "app_origin" {
+  description = "Approved HTTPS application origin without a trailing slash."
+  type        = string
+  default     = ""
+}
+
 variable "azure_ad_tenant_id" {
   description = "Entra tenant ID used for OIDC discovery."
   type        = string

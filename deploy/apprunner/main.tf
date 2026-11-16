@@ -23,10 +23,11 @@ resource "aws_apprunner_auto_scaling_configuration_version" "demo" {
         && var.azure_ad_client_secret_arn != null
         && trimspace(var.azure_ad_tenant_id) != ""
         && trimspace(var.azure_ad_client_id) != ""
+        && can(regex("^https://[^/?#]+$", trimspace(var.app_origin)))
         && startswith(var.azure_ad_redirect_uri, "https://")
         && startswith(var.azure_ad_post_logout_redirect_uri, "https://")
       )
-      error_message = "Production App Runner requires complete Entra settings, the operator-managed secret ARN, and an instance role."
+      error_message = "Production App Runner requires an HTTPS origin, complete Entra settings, the operator-managed secret ARN, and an instance role."
     }
   }
 }
@@ -50,13 +51,14 @@ resource "aws_apprunner_service" "application" {
       image_configuration {
         port = "8000"
         runtime_environment_variables = {
-          APP_ENV                              = var.deployment_environment
-          AUTH_REQUIRED                        = var.deployment_environment == "production" ? "true" : "false"
-          AUTH_MOCK_MODE                       = "false"
-          AZURE_AD_TENANT_ID                   = var.azure_ad_tenant_id
-          AZURE_AD_CLIENT_ID                   = var.azure_ad_client_id
-          AZURE_AD_REDIRECT_URI                = var.azure_ad_redirect_uri
-          AZURE_AD_POST_LOGOUT_REDIRECT_URI    = var.azure_ad_post_logout_redirect_uri
+          APP_ENV                           = var.deployment_environment
+          AUTH_REQUIRED                     = var.deployment_environment == "production" ? "true" : "false"
+          AUTH_MOCK_MODE                    = "false"
+          APP_ORIGIN                        = var.app_origin
+          AZURE_AD_TENANT_ID                = var.azure_ad_tenant_id
+          AZURE_AD_CLIENT_ID                = var.azure_ad_client_id
+          AZURE_AD_REDIRECT_URI             = var.azure_ad_redirect_uri
+          AZURE_AD_POST_LOGOUT_REDIRECT_URI = var.azure_ad_post_logout_redirect_uri
         }
         runtime_environment_secrets = var.azure_ad_client_secret_arn == null ? {} : {
           AZURE_AD_CLIENT_SECRET = var.azure_ad_client_secret_arn

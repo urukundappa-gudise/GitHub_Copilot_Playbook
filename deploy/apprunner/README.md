@@ -22,6 +22,7 @@ service.
 - The origin guard accepts sibling `*.awsapprunner.com` origins only as an
   explicit cohort-demo convenience. This permits another App Runner service to
   make browser requests and is not appropriate as a production origin policy.
+  Auth-required deployments instead require an explicit approved `app_origin`.
 - App Runner, ECR, and related AWS resources can incur charges. The design
   avoids RDS and a VPC connector; it does not promise a zero-cost AWS service.
 

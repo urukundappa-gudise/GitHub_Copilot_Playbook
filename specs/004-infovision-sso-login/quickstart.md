@@ -66,6 +66,8 @@ Expected result: the explicit test mock can exercise the authenticated path; wit
 6. Submit an intake and confirm its subject is the verified Entra `oid`; then sign out. Confirm local session revocation and cookie clearing precede the Entra end-session redirect.
 7. Replay a consumed callback, alter state/nonce, remove required claims, expire/revoke the session, and call intake APIs without a session. Each attempt must fail closed and produce no PII/token logs.
 
+For ECS Express production-mode staging, configure `app_origin` to the approved HTTPS origin and supply `database_url_secret_arn` as a separate raw-string Secrets Manager secret to both bootstrap and the ECS service root. The database must be reachable over an approved network path and migrated before starting the application. The checked-in deployment workflow remains restricted to `main`; feature-branch staging requires a separately approved operator deployment. Review CloudFront routing, API caching, cookie/query forwarding, WebSocket support, and ingress logging before live tests; these are not verified by the application tests.
+
 ### Post-deployment smoke script
 
 After an approved interactive sign-in with a dedicated staging test account, provide the following settings to the smoke process through an approved secret-injection mechanism. `OIDC_TEST_SESSION_COOKIE` is a bearer credential: do not place its value in shell history, command arguments, CI logs, files, or chat. The script prints only check names and pass/fail status; logout intentionally revokes the supplied test session.

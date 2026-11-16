@@ -64,6 +64,7 @@ def test_required_auth_without_verifier_fails_closed_instead_of_using_demo_subje
     app = create_app(
         database_url="sqlite+pysqlite:///:memory:",
         auth_settings=settings,
+        allowed_origins={"http://testserver"},
     )
     with TestClient(app, headers={"origin": "http://testserver"}) as client:
         response = client.post("/api/v1/sessions")

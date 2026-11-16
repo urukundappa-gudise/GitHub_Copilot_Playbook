@@ -49,6 +49,8 @@ def test_deployments_keep_demos_optional_and_production_auth_required() -> None:
         assert "APP_ENV" in config and "var.deployment_environment" in config
         assert "var.deployment_environment == \"production\"" in config
         assert "AUTH_MOCK_MODE" in config
+        assert "APP_ORIGIN" in config
+        assert "var.app_origin" in config
         assert "AZURE_AD_TENANT_ID" in config
         assert "AZURE_AD_CLIENT_ID" in config
         assert "AZURE_AD_REDIRECT_URI" in config
