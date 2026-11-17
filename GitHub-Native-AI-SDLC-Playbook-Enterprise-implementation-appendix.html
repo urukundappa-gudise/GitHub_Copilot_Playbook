@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Playbook Implementation Supplement | Enterprise Identity</title>
+  <style>
+    @page { size: A4; margin: 15mm 17mm 17mm; }
+    :root {
+      --ink: #1d1b1a;
+      --muted: #65615d;
+      --line: #dedbd6;
+      --accent: #bd5638;
+      --accent-pale: #f7eee9;
+      --panel: #f3f3ee;
+      --dark: #171719;
+      --dark-ink: #f8f6f1;
+      --green: #2f9d65;
+      --blue: #438fc3;
+      --mono: Consolas, "Courier New", monospace;
+      --serif: Georgia, "Times New Roman", serif;
+      --sans: Arial, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; color: var(--ink); background: #fff; }
+    body { font: 9.5pt/1.48 var(--sans); }
+    .page { min-height: 263mm; position: relative; page-break-after: always; padding-bottom: 12mm; }
+    .page:last-child { page-break-after: auto; }
+    .eyebrow { color: var(--accent); font: 700 8pt/1.3 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    h1, h2, h3 { font-family: var(--serif); font-weight: 500; }
+    h1 { margin: 5mm 0 3mm; font-size: 30pt; line-height: 1.08; }
+    h2 { margin: 0 0 3mm; font-size: 21pt; line-height: 1.12; }
+    h3 { margin: 0 0 1.5mm; font-size: 12pt; }
+    p { margin: 1.5mm 0 2.5mm; }
+    .lede { max-width: 165mm; color: var(--muted); font: 11pt/1.4 var(--serif); }
+    .rule { height: 1px; margin: 4mm 0; background: var(--line); }
+    .banner { margin: 4mm 0; padding: 4mm 5mm; border-left: 1.3mm solid var(--accent); background: var(--accent-pale); }
+    .dark { margin: 4mm 0; padding: 4mm 5mm; background: var(--dark); color: var(--dark-ink); }
+    .dark .eyebrow { color: #e58b68; }
+    .dark p:last-child, .banner p:last-child { margin-bottom: 0; }
+    .flow { margin: 4mm 0; padding: 4mm; border: 1px solid var(--line); background: var(--panel); font: 8pt/1.7 var(--mono); overflow-wrap: anywhere; }
+    .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin: 3mm 0; }
+    .panel { padding: 3.5mm; border-top: 1mm solid var(--accent); background: var(--panel); }
+    .panel.blue { border-color: var(--blue); }
+    .panel.green { border-color: var(--green); }
+    .panel p:last-child { margin-bottom: 0; }
+    table { width: 100%; margin: 3mm 0; border-collapse: collapse; font-size: 8.3pt; line-height: 1.38; }
+    th, td { padding: 2.4mm 2.6mm; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font: 700 7.3pt/1.25 var(--mono); text-transform: uppercase; }
+    td:first-child { width: 29%; font-weight: 700; }
+    code { font: 8.1pt var(--mono); overflow-wrap: anywhere; }
+    pre { margin: 2mm 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 7.6pt/1.42 var(--mono); }
+    ul, ol { margin: 2mm 0; padding-left: 5mm; }
+    li { margin: 1.2mm 0; }
+    .small { color: var(--muted); font-size: 8pt; }
+    .footer { position: absolute; right: 0; bottom: 0; left: 0; padding-top: 2mm; border-top: 1px solid var(--line); color: #85817c; font-size: 7.5pt; }
+    .footer span:last-child { float: right; }
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      table, .panel, .banner, .dark { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <section class="page">
+    <div class="eyebrow">Appendix D · Cross-client implementation patterns</div>
+    <h1>Enterprise Identity Integration</h1>
+    <p class="lede">A cross-client supplement to the GitHub-Native AI SDLC Playbook. Adapt the provider, callback URLs, cloud resources, and acceptance gates to each client’s approved environment.</p>
+
+    <div class="banner">
+      <strong>Reference implementation status</strong>
+      <p>The repository demonstrates a dedicated login entry, backend OIDC flow, deployment code, and CI/workflow controls. These are implementation patterns, not a deployed service or a client-specific configuration. Each client environment requires its own provider setup, deployment approval, live acceptance, and teardown proof.</p>
+    </div>
+
+    <h2>Authentication path</h2>
+    <p>A client application may provide a dedicated login entry such as <code>/login</code>. The browser navigates to a backend-owned authentication endpoint; provider secrets and tokens stay on the server.</p>
+    <div class="flow">Browser /login → GET /api/v1/auth/login → OIDC authorization-code flow + S256 PKCE → GET /api/v1/auth/callback → validated identity → opaque application session → GET /api/v1/auth/session</div>
+    <div class="columns">
+      <article class="panel">
+        <h3>Identity and session</h3>
+        <p>For Microsoft Entra ID, configure <code>AZURE_AD_TENANT_ID</code>, <code>AZURE_AD_CLIENT_ID</code>, <code>AZURE_AD_REDIRECT_URI</code>, and <code>AZURE_AD_POST_LOGOUT_REDIRECT_URI</code>. The backend discovers tenant-specific OIDC metadata and requests <code>openid profile email</code>. Validate issuer, audience, signature, expiry, state, nonce, and S256 PKCE; require the ID-token claims <code>oid</code>, <code>upn</code>, and <code>name</code>, with email optional. Use <code>oid</code> as the stable authorization subject, never email alone. Store only a digest of the opaque session token and set <code>oidc_session</code> as <code>HttpOnly</code>, <code>Secure</code>, and <code>SameSite=Lax</code>.</p>
+      </article>
+      <article class="panel blue">
+        <h3>Authorization boundary</h3>
+        <p>Production uses <code>APP_ENV=production</code>, <code>AUTH_REQUIRED=true</code>, and <code>AUTH_MOCK_MODE=false</code>. Keep <code>AZURE_AD_CLIENT_SECRET</code> server-side: local development reads it from the ignored <code>.env</code>; AWS ECS injects it from Secrets Manager by ARN. With authentication required, unauthenticated API and WebSocket requests fail closed. Logout revokes the local session before Entra sign-out. Mock identity is local/test-only and is never live provider acceptance evidence.</p>
+      </article>
+    </div>
+
+    <h2>Application routing</h2>
+    <table>
+      <thead><tr><th>Purpose</th><th>Repository setting</th></tr></thead>
+      <tbody>
+        <tr><td>App origin</td><td>Local: <code>http://localhost:5174</code>. Production: <code>https://&lt;approved-app-host&gt;</code>, without a trailing slash.</td></tr>
+        <tr><td>API origin</td><td>Prefer the same origin. Local Vite proxies to <code>http://127.0.0.1:8001</code>; production ECS serves the frontend and API on the approved HTTPS origin.</td></tr>
+        <tr><td>Provider callback</td><td>Local: <code>http://localhost:5174/api/v1/auth/callback</code>. Production: <code>https://&lt;approved-app-host&gt;/api/v1/auth/callback</code>. Register the exact URI as a Web redirect URI in Entra.</td></tr>
+        <tr><td>Post-logout URI</td><td>Local: <code>http://localhost:5174/login</code>. Production: <code>https://&lt;approved-app-host&gt;/login</code>. Register the exact URI in Entra.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">The DNS owner manages domain validation and app/API records. Publish certificate-validation records and verify the regional certificate is issued before deployment. Keep provider settings and callback URIs environment-specific.</p>
+    <div class="footer"><span>GitHub-Native AI SDLC Playbook · Implementation supplement</span><span>29</span></div>
+  </section>
+
+  <section class="page">
+    <div class="eyebrow">Appendix D · Delivery governance</div>
+    <h2>Workflows, CI &amp; CD</h2>
+    <p class="lede">Separate continuous verification from deployment authority. CI validates code; plan workflows are read-only; production apply and release remain explicit operator actions.</p>
+
+    <table>
+      <thead><tr><th>Control</th><th>Repository behavior</th><th>Authority boundary</th></tr></thead>
+      <tbody>
+        <tr><td><code>.github/workflows/ci.yml</code></td><td>Required backend verification, PostgreSQL migration, frontend tests/typecheck/build, production-container smoke test, Terraform format/validation for all roots, cloud-identity policy check, and golden evaluation.</td><td>Validation only. It does not create the E2E stack or publish the frontend.</td></tr>
+        <tr><td>Plan workflow</td><td>Manual plan for a registered environment on the protected default branch, using repository OIDC and private state.</td><td>Plan-only. A separately authorized operator reviews and approves apply.</td></tr>
+        <tr><td>Expiry workflow</td><td>Scheduled cleanup for registered temporary environments; begins before expiry, retains state for audit, and alerts owners on failures.</td><td>Requires a scoped cleanup OIDC role, private state/registry, and an external alert destination. DNS removal may remain an operator task.</td></tr>
+        <tr><td>Agentic Workflow</td><td>Telemetry-maintenance workflow authored in Markdown and compiled to a lockfile.</td><td>Separate from deployment GitHub Actions. No agent approval, merge, or infrastructure apply.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="dark">
+      <div class="eyebrow">Human deployment gate</div>
+      <p>No workflow should automatically apply infrastructure or release an application artifact without an explicit authorization model. The operator builds and tags immutable artifacts, registers temporary-environment expiry, reviews the plan, obtains approval, applies, publishes only approved build output, and invalidates the CDN as required by the target platform.</p>
+    </div>
+
+    <h2>Example isolated cloud topology</h2>
+    <p class="small">The following is one AWS mapping of the general controls, not a mandatory stack. Select equivalent managed services and boundaries for each client and cloud.</p>
+    <div class="columns">
+      <article class="panel green">
+        <h3>Application boundary</h3>
+        <p>Private object storage behind a CDN and web application firewall; API compute in private subnets behind an HTTPS load balancer; managed PostgreSQL for identity transactions and sessions; managed remote administration; secret manager and workload identity for runtime secrets.</p>
+      </article>
+      <article class="panel blue">
+        <h3>State and separation</h3>
+        <p>Use a dedicated infrastructure root and unique state key per temporary environment. Do not import, modify, or destroy shared application resources. Keep externally owned DNS and state resources outside disposable stack scope.</p>
+      </article>
+    </div>
+
+    <p class="small">CI should run infrastructure contract tests and formatting/validation alongside backend, migration, frontend, container, cloud-identity, and golden-evaluation gates. Complete migration and timing acceptance before release; use synthetic identities and never put production credentials in fixtures or logs.</p>
+    <div class="footer"><span>GitHub-Native AI SDLC Playbook · Implementation supplement</span><span>30</span></div>
+  </section>
+
+  <section class="page">
+    <div class="eyebrow">Appendix D · Release readiness</div>
+    <h2>Expiry, proof &amp; open gates</h2>
+    <p class="lede">Infrastructure code is not evidence that a deployment or teardown has succeeded. Keep every live acceptance gate open until it has been run in the target client environment.</p>
+
+    <div class="banner">
+      <strong>Fail-fast governance and quality gates</strong>
+      <p>Stage 1 defines mandatory gates and stop conditions; Stage 2 maps requirements to testable evidence, pass criteria, and owners. Stage 4 is the verification checkpoint: an Orchestrator Agent may coordinate deterministic checks and control phase transitions, but it must not invent or weaken criteria, accept its own remediation, or make deployment decisions. A failed or missing mandatory result blocks progression until remediation and revalidation are complete. Deployment approval remains a separate human decision in Stage 5.</p>
+    </div>
+
+    <div class="columns">
+      <article class="panel">
+        <h3>Temporary-environment controls</h3>
+        <ul>
+          <li>Unique environment ID, isolated state, ownership/expiry tags, and secret-free registry manifest.</li>
+          <li>Schedule cleanup before expiry; a 72-hour lifetime is one example policy, not a universal default.</li>
+          <li>Fail closed at expiry if cleanup is delayed; alert and retain state for audit.</li>
+          <li>Prove successful cleanup and safe retries after a controlled failure.</li>
+        </ul>
+      </article>
+      <article class="panel blue">
+        <h3>Still requires operational proof</h3>
+        <ul>
+          <li>Successful cleanup of an applied disposable environment and complete cloud resource inventory check.</li>
+          <li>Controlled cleanup failure demonstrating alert, retry, and inaccessible behavior.</li>
+          <li>External resource owners remove DNS records by the agreed expiry deadline.</li>
+          <li>Retain Terraform state and sanitized CI evidence for audit.</li>
+        </ul>
+      </article>
+    </div>
+
+    <h2>Stage 4 · Verify: human-in-the-loop quality gate</h2>
+    <p>Maintain a gate record for each required check: gate ID, source requirement, owner, command or review procedure, expected evidence, pass/fail rule, and remediation path. The orchestrator evaluates only declared deterministic results and presents evidence to the accountable human reviewer; it cannot mark a subjective or human-owned gate as passed on a person's behalf.</p>
+    <div class="columns">
+      <article class="panel">
+        <h3>Fail-fast transition rules</h3>
+        <ul>
+          <li>Start a phase only when its required upstream gates are recorded as passed.</li>
+          <li>On a failed, skipped, stale, or missing mandatory result, set the phase to blocked and name the unmet criterion; do not launch dependent phases.</li>
+          <li>Create or route a traceable remediation task, preserve the original failure evidence, then rerun the failed check and affected regression gates.</li>
+          <li>Resume only after fresh evidence passes and the named reviewer records approval. There is no agent override or silent waiver path.</li>
+        </ul>
+      </article>
+      <article class="panel blue">
+        <h3>Human authority and boundaries</h3>
+        <ul>
+          <li>A human owner approves requirements, security exceptions, live identity-provider acceptance, and release readiness.</li>
+          <li>The orchestrator may schedule checks, collect sanitized evidence, block transitions, and request remediation; it cannot approve its own changes, merge, apply infrastructure, deploy, or suppress a failed gate.</li>
+          <li>Use branch protection, required CI checks, CODEOWNERS, stale-approval dismissal, and bypass restrictions where supported.</li>
+          <li>Record reviewer, timestamp, gate IDs, results, and evidence links; exclude secrets, tokens, PII, and raw identity-provider responses.</li>
+        </ul>
+      </article>
+    </div>
+    <table>
+      <thead><tr><th>Gate</th><th>Repo mechanism / skill</th><th>Failure action and human check</th></tr></thead>
+      <tbody>
+        <tr><td>Artifact consistency</td><td><code>/speckit-analyze</code> after tasks are generated; read-only check across spec, plan, tasks, and constitution.</td><td>Resolve critical coverage or constitution issues before implementation; reviewer confirms the accepted artifacts.</td></tr>
+        <tr><td>Implementation checkpoints</td><td><code>/speckit-implement</code> executes dependency-ordered tasks and validates checkpoints; <code>/speckit-converge</code> appends remaining work after implementation.</td><td>Stop at the failed task/checkpoint, add or route remediation, implement it, then rerun the affected checkpoint and convergence review.</td></tr>
+        <tr><td>Automated quality</td><td><code>scripts/verify.ps1 -Required</code> and <code>.github/workflows/ci.yml</code>: backend tests, PostgreSQL migration, frontend tests/typecheck/build, container smoke, Terraform validation, cloud-identity policy, and golden evaluation.</td><td>Required checks must pass before merge/release. CI provides evidence; the authorized reviewer decides whether the change is acceptable.</td></tr>
+        <tr><td>Live SSO and release</td><td>Staging runbook: real Entra login/logout, HTTPS callback, secure cookie, stable <code>oid</code>, state/nonce/PKCE rejection, and unauthenticated HTTP/WebSocket denial.</td><td>Named operator performs and records live acceptance; synthetic fixtures do not satisfy human acceptance. Stage 5 apply/deploy requires a separate explicit approval.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">Repository status: CI and required verification scripts are implemented, and Spec Kit skills define analysis, task execution, and convergence checkpoints. No <code>.specify/extensions.yml</code> hook registry or autonomous governance orchestrator is currently configured. Treat orchestration and hook-based blocking as a proposed control until implemented, tested, and shown to fail closed.</p>
+
+    <h2>Stage 5 · Release and remaining acceptance gates</h2>
+    <ol>
+      <li>Confirm the approved client account, least-privilege deployment roles, private state, alert destination, network allowlist, and immutable release artifact.</li>
+      <li>Publish certificate-validation DNS records and register exact callback and post-logout URIs with the approved identity provider.</li>
+      <li>Review the plan and obtain explicit operator approval before apply. Verify health, routing, cookie properties, real provider login/logout, stable subject ownership, replay/state/nonce rejection, and unauthenticated HTTP/WebSocket denial.</li>
+      <li>Run the usability protocol and acceptance threshold defined by the client specification. Keep aggregate evidence only; synthetic tests do not satisfy human acceptance.</li>
+      <li>Complete end-to-end disposal and forced-failure proof before claiming the configured expiry requirement is verified.</li>
+    </ol>
+
+    <div class="footer"><span>GitHub-Native AI SDLC Playbook · Implementation supplement</span><span>31</span></div>
+  </section>
+</body>
+</html>
