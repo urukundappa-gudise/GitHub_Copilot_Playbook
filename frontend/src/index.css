@@ -132,9 +132,30 @@ h2 { margin-bottom: 0; font-family: Georgia, 'Times New Roman', serif; font-size
 .page-footer { height: 46px; display: flex; justify-content: space-between; align-items: center; padding: 0 5.2vw; border-top: 1px solid var(--line); background: var(--paper); color: #829087; font-size: 9px; }
 .page-footer span:first-child { font-weight: 800; letter-spacing: 0.1em; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.login-page { min-height: 100vh; display: flex; flex-direction: column; background-color: #f3f5f1; background-image: radial-gradient(#cfd9d0 0.6px, transparent 0.6px); background-size: 15px 15px; }
+.login-topbar { min-height: 72px; padding: 0 5.2vw; display: flex; align-items: center; justify-content: space-between; gap: 20px; background: var(--paper); border-bottom: 1px solid var(--line); }
+.login-topbar-label, .login-panel-label { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: 0.12em; }
+.login-layout { flex: 1; width: min(1050px, calc(100% - 48px)); margin: 0 auto; padding: 72px 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 430px); align-items: center; gap: clamp(44px, 9vw, 120px); }
+.login-copy { max-width: 480px; }
+.login-copy h1 { max-width: 440px; margin: 0; font-size: 48px; }
+.login-panel { padding: 32px; border: 1px solid var(--line); border-top: 4px solid var(--green); background: var(--paper); box-shadow: 0 18px 48px #223a2d0b; }
+.login-panel-label { margin-bottom: 14px; color: var(--green); }
+.login-sso-button { min-height: 48px; padding: 14px 16px; display: flex; align-items: center; justify-content: center; border: 0; background: var(--green); color: white; text-align: center; text-decoration: none; font-size: 13px; font-weight: 800; line-height: 1.35; }
+.login-sso-button:hover { background: #105544; }
+.login-sso-button:focus-visible, .login-back-link:focus-visible { outline: 3px solid #d6aa52; outline-offset: 3px; }
+.login-security-note { margin: 14px 0 24px; color: var(--muted); font-size: 11px; line-height: 1.55; text-align: center; }
+.login-back-link { color: var(--green); font-size: 12px; font-weight: 700; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.login-error { margin: -8px 0 16px; padding: 10px 12px; border-left: 3px solid var(--coral); background: #fff1ec; color: #88402e; font-size: 12px; line-height: 1.5; }
+.login-footer { min-height: 46px; padding: 0 5.2vw; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--line); background: var(--paper); color: #829087; font-size: 9px; }
+.login-footer span:first-child { font-weight: 800; letter-spacing: 0.1em; }
 @keyframes appear { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }
 @media (max-width: 780px) {
+  .login-topbar { min-height: 62px; padding: 10px 20px; }
+  .login-layout { width: min(610px, calc(100% - 32px)); padding: 28px 0; grid-template-columns: 1fr; gap: 18px; }
+  .login-copy { max-width: 520px; }
+  .login-copy h1 { font-size: 34px; }
+  .login-panel { max-width: 480px; padding: 22px; }
   .topbar { min-height: 62px; height: auto; padding: 10px 20px; flex-wrap: wrap; gap: 10px; }
   .authentication-status { margin-left: auto; }
   .work-area { width: min(100% - 32px, 610px); min-height: calc(100vh - 108px); padding: 31px 0 25px; grid-template-columns: 1fr; gap: 28px; }
@@ -147,6 +168,10 @@ h2 { margin-bottom: 0; font-family: Georgia, 'Times New Roman', serif; font-size
   .page-footer { padding: 0 20px; }
 }
 @media (max-width: 440px) {
+  .login-topbar-label { font-size: 9px; }
+  .login-layout { width: calc(100% - 32px); padding: 24px 0; gap: 18px; }
+  .login-copy h1 { font-size: 34px; }
+  .login-footer { padding: 0 20px; }
   .session-status { display: none; }
   .sign-in-button, .logout-button { padding: 8px 9px; font-size: 10px; }
   .employee-profile { max-width: 108px; }

@@ -36,6 +36,9 @@ function Require-Command {
     }
 }
 
+$backendPort = if ($env:APP_BACKEND_PORT) { [int]$env:APP_BACKEND_PORT } else { 8000 }
+$frontendPort = if ($env:VITE_DEV_PORT) { [int]$env:VITE_DEV_PORT } else { 5173 }
+
 if ($Test) {
     $testRootPath = $repoRoot
     if ($TestRoot) {
@@ -204,10 +207,10 @@ if ($Backend) {
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         }
         if ($uvCommand) {
-            uv run uvicorn aimplify_intake.main:app --reload
+            uv run uvicorn aimplify_intake.main:app --reload --port $backendPort
         }
         else {
-            & $venvPython -m uvicorn aimplify_intake.main:app --reload
+            & $venvPython -m uvicorn aimplify_intake.main:app --reload --port $backendPort
         }
         exit $LASTEXITCODE
     }
@@ -222,7 +225,7 @@ if ($Frontend) {
         npm ci --prefix frontend
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
-    npm run dev --prefix frontend
+    npm run dev --prefix frontend -- --port $frontendPort --strictPort
     exit $LASTEXITCODE
 }
 
@@ -269,5 +272,5 @@ Start-Process powershell.exe -ArgumentList @(
 )
 
 Write-Host 'Application startup launched.'
-Write-Host 'Frontend: http://localhost:5173'
-Write-Host 'Backend:  http://localhost:8000/health/live'
+Write-Host "Frontend: http://localhost:$frontendPort"
+Write-Host "Backend:  http://localhost:$backendPort/health/live"

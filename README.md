@@ -1,5 +1,22 @@
 # ADLC Aimplify Chatbot 
 
+## Local InfoVision SSO
+
+1. Fill in the Entra tenant ID, application client ID, and client secret in the
+   existing local `.env`. `.env` is ignored by Git and Copilot; never commit it
+   or paste the client secret into chat. `.env.example` is the reference template.
+2. Register these exact URLs on the Entra application as Web redirect URLs:
+   `http://localhost:5174/api/v1/auth/callback` and
+   `http://localhost:5174/login` (post-logout redirect).
+3. Run `./run.ps1` from PowerShell, then open `http://localhost:5174/login`.
+   The sign-in action should redirect to `login.microsoftonline.com`.
+
+The local configuration uses `AUTH_REQUIRED=true` and `AUTH_MOCK_MODE=false`.
+It reserves ports 5174 and 8001 to avoid conflicts with services on the default
+ports. If the Entra values are missing or invalid, sign-in fails closed; do not
+enable mock mode to test real credentials. Use the same `localhost` hostname
+and ports as the registered URLs so the secure session cookie is retained.
+
 ## Stage 6: Maintain
 
 The Drift Detector runs every 15 minutes and on `repository_dispatch` events

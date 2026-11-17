@@ -19,14 +19,19 @@ const requiredReporter: Reporter = {
 };
 
 export default defineConfig(({ mode }) => {
-  const proxyTarget = loadEnv(mode, '.', 'VITE_').VITE_API_PROXY_TARGET
+  const viteEnvironment = loadEnv(mode, '.', 'VITE_');
+  const proxyTarget = process.env.VITE_API_PROXY_TARGET
+    ?? viteEnvironment.VITE_API_PROXY_TARGET
     ?? 'http://localhost:8000';
+  const frontendPort = Number(
+    process.env.VITE_DEV_PORT ?? viteEnvironment.VITE_DEV_PORT ?? 5173,
+  );
 
   return {
     plugins: [react()],
     server: {
       host: '0.0.0.0',
-      port: 5173,
+      port: frontendPort,
       proxy: {
         '/api': { target: proxyTarget, changeOrigin: true, ws: true },
         '/health': { target: proxyTarget, changeOrigin: true },

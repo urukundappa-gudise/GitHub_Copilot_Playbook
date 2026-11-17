@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>InfoVision SSO Configuration Report | AIMPLIFY</title>
+  <style>
+    :root {
+      --ink: #172a2c;
+      --muted: #526669;
+      --paper: #f5f4ed;
+      --panel: #fffef9;
+      --line: #cbd4cc;
+      --teal: #146b63;
+      --teal-soft: #dcece6;
+      --orange: #bd4d2d;
+      --orange-soft: #f4e3d8;
+      --blue: #315a7d;
+      --blue-soft: #e2ebf1;
+      --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      --serif: Georgia, "Times New Roman", serif;
+      --sans: "Trebuchet MS", Verdana, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: linear-gradient(90deg, transparent 49.8%, rgba(20, 107, 99, .035) 49.8% 50.2%, transparent 50.2%), var(--paper);
+      font: 14px/1.6 var(--sans);
+    }
+    a { color: var(--teal); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { color: var(--orange); }
+    code, pre, .mono { font-family: var(--mono); }
+    code { font-size: .9em; overflow-wrap: anywhere; }
+    .masthead { padding: 17px max(24px, calc((100vw - 1200px) / 2)); display: flex; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); color: var(--muted); font: 11px/1.4 var(--mono); text-transform: uppercase; }
+    .masthead strong { color: var(--teal); }
+    .layout { width: min(1200px, calc(100% - 48px)); margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+    aside { align-self: start; position: sticky; top: 20px; margin-top: 36px; padding: 16px 0; border-top: 3px solid var(--teal); }
+    aside h2 { margin: 0 0 10px; color: var(--muted); font: 700 11px var(--mono); text-transform: uppercase; }
+    aside a { display: block; padding: 5px 0; color: var(--ink); font-size: 12px; text-decoration: none; }
+    aside a:hover { color: var(--teal); }
+    main { min-width: 0; padding: 36px 0 72px; }
+    .eyebrow { color: var(--orange); font: 700 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    h1, h2, h3 { font-family: var(--serif); font-weight: 500; line-height: 1.18; }
+    h1 { max-width: 850px; margin: 10px 0 14px; font-size: 48px; }
+    h2 { margin: 0 0 14px; font-size: 30px; }
+    h3 { margin: 0 0 8px; font-size: 20px; }
+    p { margin: 7px 0 12px; }
+    .lede { max-width: 820px; color: var(--muted); font-size: 16px; }
+    .summary { margin: 25px 0 28px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; border: 1px solid var(--line); background: var(--line); }
+    .summary > div { padding: 15px 17px; background: var(--panel); }
+    .summary b { display: block; margin-bottom: 3px; color: var(--teal); font: 700 10px var(--mono); text-transform: uppercase; }
+    .summary span { color: var(--muted); font-size: 12px; }
+    .notice { margin: 20px 0; padding: 14px 16px; border-left: 4px solid var(--orange); background: var(--orange-soft); }
+    .notice strong { color: #84391f; }
+    section { scroll-margin-top: 18px; margin: 42px 0; }
+    .section-intro { max-width: 860px; color: var(--muted); }
+    .table-wrap { margin: 14px 0 22px; overflow-x: auto; border: 1px solid var(--line); background: var(--panel); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    tr:last-child td { border-bottom: 0; }
+    th { color: var(--muted); background: #edf1eb; font: 700 10px var(--mono); text-transform: uppercase; }
+    td:first-child { min-width: 170px; font-weight: 700; }
+    .tag { display: inline-block; padding: 2px 7px; color: #16564f; background: var(--teal-soft); font: 10px var(--mono); text-transform: uppercase; }
+    .tag.warn { color: #84391f; background: var(--orange-soft); }
+    .tag.aws { color: #294c69; background: var(--blue-soft); }
+    .steps { counter-reset: step; display: grid; gap: 9px; }
+    .step { counter-increment: step; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; padding: 13px 15px; border: 1px solid var(--line); background: var(--panel); }
+    .step::before { content: counter(step, decimal-leading-zero); color: var(--teal); font: 700 13px var(--mono); }
+    .step p:last-child { margin-bottom: 0; }
+    .codebox { margin: 11px 0; padding: 13px 15px; overflow-x: auto; border: 1px solid var(--line); background: #e9eee8; }
+    pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.65; }
+    .flow { margin: 18px 0; padding: 15px; border: 1px solid var(--line); background: var(--ink); color: #f8f6ec; font: 11px/1.8 var(--mono); overflow-wrap: anywhere; }
+    .flow b { color: #90d0b8; font-weight: 700; }
+    .checklist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; margin: 14px 0; padding: 0; list-style: none; }
+    .checklist li { position: relative; padding: 8px 10px 8px 30px; border-bottom: 1px solid var(--line); }
+    .checklist li::before { content: ""; position: absolute; left: 7px; top: 13px; width: 11px; height: 11px; border: 1px solid var(--teal); background: var(--teal-soft); }
+    details { margin: 12px 0; padding: 12px 15px; border: 1px solid var(--line); background: var(--panel); }
+    summary { color: var(--teal); cursor: pointer; font-weight: 700; }
+    .small { color: var(--muted); font-size: 11px; }
+    footer { padding: 18px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+    @media (max-width: 820px) {
+      .layout { display: block; width: min(100% - 32px, 720px); }
+      aside { position: static; margin-top: 18px; }
+      aside nav { display: flex; flex-wrap: wrap; gap: 0 15px; }
+      main { padding-top: 24px; }
+      h1 { font-size: 38px; }
+      h2 { font-size: 26px; }
+      .summary { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .masthead { padding-inline: 16px; font-size: 9px; }
+      .layout { width: calc(100% - 28px); }
+      h1 { font-size: 32px; }
+      .checklist { grid-template-columns: 1fr; }
+      .step { grid-template-columns: 28px minmax(0, 1fr); padding: 11px; }
+      td:first-child { min-width: 130px; }
+    }
+    @media print {
+      body { background: white; font-size: 10pt; }
+      .masthead, aside { display: none; }
+      .layout { display: block; width: auto; margin: 0; }
+      main { padding: 0; }
+      section { break-inside: avoid-page; }
+      a { color: inherit; }
+      .table-wrap, .step, .notice { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header class="masthead"><span><strong>AIMPLIFY</strong> / Identity Operations</span><span>Entra ID + AWS / Configuration Report</span></header>
+  <div class="layout">
+    <aside aria-label="Report contents">
+      <h2>Contents</h2>
+      <nav>
+        <a href="#overview">Overview</a>
+        <a href="#entra">Microsoft Entra portal</a>
+        <a href="#local">Local .env</a>
+        <a href="#aws">AWS portal</a>
+        <a href="#github">GitHub deployment values</a>
+        <a href="#production">Production URLs</a>
+        <a href="#verify">Validation</a>
+        <a href="#troubleshoot">Troubleshooting</a>
+        <a href="#sources">Repository sources</a>
+      </nav>
+    </aside>
+    <main>
+      <header id="overview">
+        <p class="eyebrow">AIMPLIFY / InfoVision SSO</p>
+        <h1>SSO configuration: portal values and runtime wiring</h1>
+        <p class="lede">A setup report for the repository's Microsoft Entra ID OpenID Connect flow, local developer environment, and AWS ECS Express deployment. It lists what goes where and which values are secrets.</p>
+        <div class="summary" aria-label="Configuration summary">
+          <div><b>Identity provider</b><span>Microsoft Entra ID, OIDC authorization code flow with PKCE</span></div>
+          <div><b>Active AWS workflow</b><span>ECS Express via GitHub Actions and Terraform; App Runner is a separate retained deployment</span></div>
+          <div><b>Local ports</b><span>Frontend 5174; backend 8001; URLs must match Entra registration exactly</span></div>
+        </div>
+        <div class="notice"><strong>Secret handling:</strong> This report contains placeholders and no credential values. Keep the Entra client-secret value in local <code>.env</code> for local development and in AWS Secrets Manager for AWS. Never put it in Git, GitHub variables, Terraform state/arguments, screenshots, or chat. Rotate any credential that has been exposed.</div>
+        <div class="flow" aria-label="SSO flow"><b>Browser</b> → /api/v1/auth/login → <b>Microsoft Entra</b> → /api/v1/auth/callback → validated claims → <b>HttpOnly session cookie</b> → /api/v1/auth/session</div>
+        <p class="small">Local development does not require AWS. AWS portal setup below applies to the deployed service and GitHub deployment pipeline.</p>
+      </header>
+
+      <section id="entra">
+        <p class="eyebrow">01 / Identity provider</p>
+        <h2>Microsoft Entra portal</h2>
+        <p class="section-intro">Use the InfoVision tenant and one app registration for this relying application. The backend discovers tenant-specific OIDC endpoints and requests <code>openid profile email</code>. It does not call Microsoft Graph, so no Graph API permission is required by this flow.</p>
+        <div class="steps">
+          <article class="step"><div><h3>Create or select the app registration</h3><p>In <strong>Microsoft Entra admin center → Identity → Applications → App registrations</strong>, select the AIMPLIFY registration or create one. For employee-only access, select accounts in this organizational directory (single tenant), subject to InfoVision identity-admin policy.</p></div></article>
+          <article class="step"><div><h3>Copy the application identifiers</h3><p>From the registration's <strong>Overview</strong>, copy <strong>Directory (tenant) ID</strong> into <code>AZURE_AD_TENANT_ID</code> and <strong>Application (client) ID</strong> into <code>AZURE_AD_CLIENT_ID</code>. These are identifiers, not credentials.</p></div></article>
+          <article class="step"><div><h3>Configure Web redirect URIs</h3><p>Under <strong>Authentication → Add a platform → Web</strong>, add the exact callback and post-logout URLs for the environment. The two localhost URLs below are for the current local port settings; production URLs are different.</p></div></article>
+          <article class="step"><div><h3>Create a client secret</h3><p>Under <strong>Certificates &amp; secrets → Client secrets → New client secret</strong>, create a secret according to organizational expiry policy. Copy its <strong>Value</strong>, not its Secret ID. Entra shows the value only once. Store it locally in <code>.env</code> or create a raw-string secret in AWS Secrets Manager for ECS.</p></div></article>
+          <article class="step"><div><h3>Check token claims</h3><p>The backend requires ID-token claims <code>oid</code>, <code>upn</code>, and <code>name</code>; <code>email</code> is optional. In <strong>Token configuration</strong>, verify the tenant emits <code>upn</code> and <code>name</code> in the ID token. If needed and approved, add <code>upn</code> as an optional ID-token claim. The authorization subject is the stable <code>oid</code>, not email or UPN.</p></div></article>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Portal value</th><th>Local development</th><th>Production ECS Express</th></tr></thead>
+            <tbody>
+              <tr><td>Web redirect URI</td><td><code>http://localhost:5174/api/v1/auth/callback</code></td><td><code>https://&lt;approved-host&gt;/api/v1/auth/callback</code></td></tr>
+              <tr><td>Post-logout redirect URI</td><td><code>http://localhost:5174/login</code></td><td><code>https://&lt;approved-host&gt;/login</code></td></tr>
+              <tr><td>Tenant</td><td>Directory (tenant) ID from Overview</td><td>Same InfoVision tenant ID</td></tr>
+              <tr><td>Client</td><td>Application (client) ID from Overview</td><td>Same app registration client ID</td></tr>
+              <tr><td>Credential</td><td>Client secret Value stored only in local <code>.env</code></td><td>Client secret stored as raw SecretString in AWS Secrets Manager; deploy only its ARN</td></tr>
+              <tr><td>Scopes / claims</td><td><code>openid profile email</code>; ID token needs <code>oid</code>, <code>upn</code>, <code>name</code></td><td>Same scopes and required claims</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="small">The app sends <code>client_secret_post</code> to the Entra token endpoint. The callback and post-logout URLs must be registered exactly, including scheme, host, port, path, and trailing-slash behavior.</p>
+      </section>
+
+      <section id="local">
+        <p class="eyebrow">02 / Developer machine</p>
+        <h2>Local <code>.env</code> values</h2>
+        <p class="section-intro">The repository root <code>.env</code> is ignored by Git and loaded by <code>run.ps1</code>. The existing local file should retain unrelated values such as <code>DATABASE_URL</code> and AI-provider configuration. Do not replace it wholesale.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Variable</th><th>Value or source</th><th>Secret?</th></tr></thead>
+            <tbody>
+              <tr><td><code>APP_ENV</code></td><td><code>local</code></td><td>No</td></tr>
+              <tr><td><code>AUTH_REQUIRED</code></td><td><code>true</code></td><td>No</td></tr>
+              <tr><td><code>AUTH_MOCK_MODE</code></td><td><code>false</code> for real InfoVision login</td><td>No</td></tr>
+              <tr><td><code>APP_BACKEND_PORT</code></td><td><code>8001</code></td><td>No</td></tr>
+              <tr><td><code>VITE_DEV_PORT</code></td><td><code>5174</code></td><td>No</td></tr>
+              <tr><td><code>VITE_API_PROXY_TARGET</code></td><td><code>http://127.0.0.1:8001</code></td><td>No</td></tr>
+              <tr><td><code>APP_ORIGIN</code></td><td><code>http://localhost:5174</code>; origin only, no path</td><td>No</td></tr>
+              <tr><td><code>ALLOWED_ORIGINS</code></td><td><code>http://localhost:5174</code> for the local frontend origin</td><td>No</td></tr>
+              <tr><td><code>AZURE_AD_TENANT_ID</code></td><td>Directory (tenant) ID from Entra app registration's tenant</td><td>No</td></tr>
+              <tr><td><code>AZURE_AD_CLIENT_ID</code></td><td>Application (client) ID from Entra app registration</td><td>No</td></tr>
+              <tr><td><code>AZURE_AD_CLIENT_SECRET</code></td><td>Client secret <strong>Value</strong>; enter locally, never paste into chat</td><td><span class="tag warn">Secret</span></td></tr>
+              <tr><td><code>AZURE_AD_REDIRECT_URI</code></td><td><code>http://localhost:5174/api/v1/auth/callback</code></td><td>No</td></tr>
+              <tr><td><code>AZURE_AD_POST_LOGOUT_REDIRECT_URI</code></td><td><code>http://localhost:5174/login</code></td><td>No</td></tr>
+              <tr><td><code>DATABASE_URL</code></td><td>Existing local DB setting; SQLite in-memory is suitable for a local smoke test only and does not persist data</td><td>May contain credentials</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="codebox"><pre>APP_ENV=local
+AUTH_REQUIRED=true
+AUTH_MOCK_MODE=false
+APP_BACKEND_PORT=8001
+VITE_DEV_PORT=5174
+VITE_API_PROXY_TARGET=http://127.0.0.1:8001
+APP_ORIGIN=http://localhost:5174
+ALLOWED_ORIGINS=http://localhost:5174
+AZURE_AD_TENANT_ID=&lt;Directory (tenant) ID&gt;
+AZURE_AD_CLIENT_ID=&lt;Application (client) ID&gt;
+AZURE_AD_CLIENT_SECRET=&lt;secret Value; local only&gt;
+AZURE_AD_REDIRECT_URI=http://localhost:5174/api/v1/auth/callback
+AZURE_AD_POST_LOGOUT_REDIRECT_URI=http://localhost:5174/login</pre></div>
+        <p class="small">Use the same <code>localhost</code> hostname in the browser and redirect settings. After changing <code>.env</code>, restart both processes with <code>.\run.ps1</code> from the repository root; the launcher uses the configured ports and strict frontend binding.</p>
+      </section>
+
+      <section id="aws">
+        <p class="eyebrow">03 / Cloud runtime</p>
+        <h2>AWS portal configuration</h2>
+        <p class="section-intro">The active GitHub Actions workflow deploys <strong>ECS Express</strong>. The App Runner Terraform root is retained separately and is not the active workflow. Local SSO does not need AWS; the following is for production deployment.</p>
+        <div class="notice"><strong>Terraform ownership:</strong> Use the AWS console for account prerequisites, Terraform state bucket, and Secrets Manager values. The repository's bootstrap and service Terraform create/manage the ECR, VPC/subnets, ECS cluster, roles, and ECS Express service. Avoid manually creating duplicate resources or broad IAM permissions.</div>
+        <div class="steps">
+          <article class="step"><div><h3>Choose account and region</h3><p>Record the AWS account ID and one region for ECR, ECS Express, Secrets Manager, and Terraform state. Set the GitHub variable <code>AWS_REGION</code> to that same region.</p></div></article>
+          <article class="step"><div><h3>Prepare Terraform state bucket</h3><p>Provision the S3 bucket before Terraform init. In AWS S3, block all public access, enable encryption and versioning, and retain state. The workflow uses S3 lockfiles. Do not store AWS keys or Entra secret values in the bucket manually.</p></div></article>
+          <article class="step"><div><h3>Verify GitHub Actions OIDC provider</h3><p>In IAM → Identity providers, verify provider URL <code>https://token.actions.githubusercontent.com</code> with audience <code>sts.amazonaws.com</code>. The bootstrap Terraform creates the repository/ref-scoped deployment role. Its trust must match the exact repository and <code>main</code> ref; immutable owner/repository IDs are preferred.</p></div></article>
+          <article class="step"><div><h3>Create Secrets Manager values</h3><p>Create a secret for the Entra client secret as a <strong>plain raw string</strong> (not a JSON object). Record only its ARN for deployment. For production ECS, create a second raw-string secret containing the PostgreSQL connection URL and record its ARN. Never put either secret value in GitHub variables, Terraform variables, shell history, or this report.</p></div></article>
+          <article class="step"><div><h3>Apply bootstrap infrastructure</h3><p>Apply <code>deploy/bootstrap</code> with <code>enable_ecs_express=true</code> and the exact secret ARNs. Terraform creates the ECR repository, GitHub deployment role, ECS cluster/VPC/public subnets, execution role, infrastructure role, and scoped access to the configured secrets. Review the plan before applying and retain state keys.</p></div></article>
+          <article class="step"><div><h3>Configure the service and database</h3><p>Use a shared PostgreSQL database for production; apply the Alembic chain through <code>0003_oidc_sessions</code> before routing users. Ensure ECS tasks have approved network/TLS access to the database and Secrets Manager. In ECS Express the execution role reads only the configured secret ARNs.</p></div></article>
+          <article class="step"><div><h3>Set production identity URLs</h3><p>Use a stable HTTPS custom domain when possible. Otherwise obtain the public ingress hostname from the ECS Express deployment. Set <code>APP_ORIGIN</code> to the exact origin without a trailing slash; set callback and post-logout URLs to paths on that same host; register both in Entra before production sign-in.</p></div></article>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>AWS Console area</th><th>Required value / action</th><th>How used</th></tr></thead>
+            <tbody>
+              <tr><td>IAM → Identity providers</td><td>GitHub OIDC issuer <code>https://token.actions.githubusercontent.com</code>; audience <code>sts.amazonaws.com</code></td><td>GitHub Actions gets short-lived AWS credentials; no static AWS access keys</td></tr>
+              <tr><td>S3 → state bucket</td><td>Private, encrypted, versioned bucket with state-lock support</td><td>Terraform state; bucket name is <code>TF_STATE_BUCKET</code></td></tr>
+              <tr><td>Secrets Manager</td><td>Entra client secret as raw string; PostgreSQL URL as a separate raw string</td><td>Only their ARNs go to Terraform/GitHub; ECS injects values at runtime</td></tr>
+              <tr><td>IAM roles</td><td>Bootstrap-generated GitHub deploy, ECS execution, and ECS infrastructure roles</td><td>Use Terraform outputs as GitHub variables; do not broaden permissions manually</td></tr>
+              <tr><td>ECR / ECS</td><td>Bootstrap-generated ECR, cluster, subnets; ECS Express service created by workflow/Terraform</td><td>Image is immutable full commit SHA; service ingress provides the production host</td></tr>
+              <tr><td>CloudWatch / ECS service</td><td>Review task startup, secret injection, health, and deployment logs</td><td>Do not log auth codes, tokens, cookies, state, nonce, or claim values</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="github">
+        <p class="eyebrow">04 / Delivery pipeline</p>
+        <h2>GitHub repository variables</h2>
+        <p class="section-intro">Configure these under repository Settings → Secrets and variables → Actions → Variables. The workflow deploys only from <code>main</code>. These are non-secret identifiers/ARNs except no secret values should be placed here at all.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Variable</th><th>Value / source</th></tr></thead>
+            <tbody>
+              <tr><td><code>AWS_REGION</code></td><td>Chosen AWS region</td></tr>
+              <tr><td><code>AWS_DEPLOY_ROLE_ARN</code></td><td>Bootstrap output <code>github_deployment_role_arn</code></td></tr>
+              <tr><td><code>ECR_REPOSITORY</code></td><td>Bootstrap output <code>ecr_repository_name</code></td></tr>
+              <tr><td><code>TF_STATE_BUCKET</code></td><td>Pre-provisioned S3 Terraform state bucket</td></tr>
+              <tr><td><code>TF_ECS_STATE_KEY</code></td><td><code>ecs-express/service.tfstate</code> (or the configured bootstrap ECS state key)</td></tr>
+              <tr><td><code>DEPLOYMENT_ENVIRONMENT</code></td><td><code>production</code> for required SSO; <code>demo</code> is unauthenticated and not for private data</td></tr>
+              <tr><td><code>ECS_SERVICE_NAME</code></td><td>Same named service as configured in bootstrap</td></tr>
+              <tr><td><code>ECS_CLUSTER_NAME</code></td><td>Bootstrap output/configured ECS cluster name</td></tr>
+              <tr><td><code>ECS_EXECUTION_ROLE_ARN</code></td><td>Bootstrap output <code>ecs_execution_role_arn</code></td></tr>
+              <tr><td><code>ECS_INFRASTRUCTURE_ROLE_ARN</code></td><td>Bootstrap output <code>ecs_infrastructure_role_arn</code></td></tr>
+              <tr><td><code>ECS_SUBNET_IDS</code></td><td>JSON array from <code>terraform output -json ecs_subnet_ids</code></td></tr>
+              <tr><td><code>AZURE_AD_CLIENT_SECRET_ARN</code></td><td>ARN of the Secrets Manager raw-string Entra secret; not the value</td></tr>
+              <tr><td><code>DATABASE_URL_SECRET_ARN</code></td><td>ARN of the Secrets Manager raw-string PostgreSQL URL</td></tr>
+              <tr><td><code>AZURE_AD_TENANT_ID</code></td><td>Entra Directory (tenant) ID</td></tr>
+              <tr><td><code>AZURE_AD_CLIENT_ID</code></td><td>Entra Application (client) ID</td></tr>
+              <tr><td><code>AZURE_AD_REDIRECT_URI</code></td><td>Exact registered production HTTPS callback URL</td></tr>
+              <tr><td><code>AZURE_AD_POST_LOGOUT_REDIRECT_URI</code></td><td>Exact registered production HTTPS post-logout URL</td></tr>
+              <tr><td><code>APP_ORIGIN</code></td><td>Exact production HTTPS origin, no path and no trailing slash</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="notice"><strong>Not a GitHub variable:</strong> the Entra client-secret value belongs in AWS Secrets Manager. The workflow passes <code>AZURE_AD_CLIENT_SECRET_ARN</code>, and Terraform maps the secret to the container's <code>AZURE_AD_CLIENT_SECRET</code> environment variable.</p>
+      </section>
+
+      <section id="production">
+        <p class="eyebrow">05 / URL alignment</p>
+        <h2>Production URL values must agree</h2>
+        <p>Let <code>https://&lt;approved-host&gt;</code> be the exact public ECS Express origin (or approved custom domain):</p>
+        <div class="codebox"><pre>APP_ORIGIN=https://&lt;approved-host&gt;
+AZURE_AD_REDIRECT_URI=https://&lt;approved-host&gt;/api/v1/auth/callback
+AZURE_AD_POST_LOGOUT_REDIRECT_URI=https://&lt;approved-host&gt;/login</pre></div>
+        <ul class="checklist">
+          <li>Register callback and post-logout URLs as Web redirect URIs in Entra.</li>
+          <li>Use the exact hostname, HTTPS scheme, and paths in GitHub variables.</li>
+          <li>Set <code>DEPLOYMENT_ENVIRONMENT=production</code>.</li>
+          <li>Set <code>AUTH_REQUIRED=true</code> and <code>AUTH_MOCK_MODE=false</code>.</li>
+          <li>Set a production <code>APP_ORIGIN</code> without a trailing slash.</li>
+          <li>Use client-secret and DB URL secret ARNs from Secrets Manager.</li>
+          <li>Apply the OIDC session database migration before release.</li>
+          <li>Redeploy ECS tasks after rotating either runtime secret.</li>
+        </ul>
+        <p class="small">If the final public hostname is not known before service creation, choose a stable custom domain or provision the service to obtain its ingress host, then register the exact URLs and apply the production configuration. Do not guess or register a different URL.</p>
+      </section>
+
+      <section id="verify">
+        <p class="eyebrow">06 / Acceptance</p>
+        <h2>End-to-end verification</h2>
+        <div class="steps">
+          <article class="step"><div><h3>Local app</h3><p>Run <code>.run.ps1</code> from the repository root and open <code>http://localhost:5174/login</code>. Click the InfoVision SSO button. The browser should navigate to <code>https://login.microsoftonline.com/&lt;tenant&gt;/oauth2/v2.0/authorize</code>. Do not paste the full authorization URL into a ticket: it carries protocol state.</p></div></article>
+          <article class="step"><div><h3>Callback and session</h3><p>After successful sign-in, Entra returns to <code>/api/v1/auth/callback</code>; the app validates signature, issuer, audience, expiry, state, nonce, and PKCE before setting an HttpOnly, Secure, SameSite=Lax <code>oidc_session</code>. The UI should display the verified employee name and UPN.</p></div></article>
+          <article class="step"><div><h3>Session endpoint</h3><p>Before login, <code>GET /api/v1/auth/session</code> should return 401 and header <code>X-Authentication-Required: true</code>. After login, it should return 200 with authenticated status. Do not log or publish response cookies or tokens.</p></div></article>
+          <article class="step"><div><h3>Production release</h3><p>Confirm ECS Express is healthy, deployed the intended commit SHA, has secret injection and PostgreSQL connectivity, and returns the same auth/session behavior over its HTTPS ingress. A local test does not prove AWS release health.</p></div></article>
+        </div>
+      </section>
+
+      <section id="troubleshoot">
+        <p class="eyebrow">07 / Common failures</p>
+        <h2>Troubleshooting</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Result</th><th>Likely cause / check</th></tr></thead>
+            <tbody>
+              <tr><td><code>503 AUTHENTICATION_UNAVAILABLE</code></td><td>Provider not constructed because tenant, client ID, secret, callback, or logout URL is missing; or OIDC discovery/network failed. Check variable presence and restart backend; never print secret values.</td></tr>
+              <tr><td>Entra redirect URI error</td><td>The callback URL sent by the app does not exactly match an Entra Web redirect URI. Compare scheme, host, port, and path.</td></tr>
+              <tr><td>Callback returns to <code>?auth=error</code></td><td>Entra returned an error, callback data was invalid, PKCE/token exchange failed, required claim is missing, or token validation failed. Check sanitized server error categories, app registration claims, and client-secret expiry.</td></tr>
+              <tr><td><code>401</code> from session endpoint</td><td>Expected before sign-in; after sign-in, check cookie acceptance, hostname consistency, callback completion, and session persistence.</td></tr>
+              <tr><td>Works locally, fails in AWS</td><td>Compare ECS runtime env names, Secrets Manager ARNs, execution-role access, task network/TLS, PostgreSQL migration, production HTTPS origin, and registered production redirect URIs.</td></tr>
+              <tr><td>Login loops or session disappears</td><td>Secure cookies require HTTPS in deployment. In local development use the exact <code>localhost</code> origin/port in the browser and Entra registration.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="sources">
+        <p class="eyebrow">08 / Source of truth</p>
+        <h2>Repository references</h2>
+        <ul>
+          <li><a href=".env.example">Local environment template</a></li>
+          <li><a href="README.md">Local SSO setup notes</a></li>
+          <li><a href="deploy/ecs-express/README.md">ECS Express deployment and enterprise rollout</a></li>
+          <li><a href="deploy/ecs-express/main.tf">ECS Express runtime environment and secret injection</a></li>
+          <li><a href="deploy/bootstrap/ecs.tf">Bootstrap ECS roles, networking, and secret access</a></li>
+          <li><a href=".github/workflows/cd.yml">Active GitHub Actions deployment workflow</a></li>
+          <li><a href="backend/src/aimplify_intake/api/auth.py">OIDC configuration, scopes, and claim validation</a></li>
+          <li><a href="backend/src/aimplify_intake/api/app.py">Login, callback, session, and logout endpoints</a></li>
+        </ul>
+        <p class="small">This report describes repository configuration and operator inputs. It does not assert that AWS resources, Entra registrations, DNS, production secrets, database migrations, or live employee sign-ins have been provisioned or verified.</p>
+      </section>
+      <footer>Generated for the AIMPLIFY InfoVision SSO integration. Keep secret values outside this report and all source-controlled files.</footer>
+    </main>
+  </div>
+</body>
+</html>

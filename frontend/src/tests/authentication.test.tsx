@@ -76,6 +76,25 @@ describe('authentication status', () => {
   });
 });
 
+describe('SSO login page', () => {
+  afterEach(() => {
+    window.history.replaceState({}, '', '/');
+    vi.clearAllMocks();
+  });
+
+  it('renders a dedicated sign-in screen at /login', () => {
+    window.history.pushState({}, '', '/login');
+    render(<App />);
+
+    expect(screen.getByRole('heading', { name: /sign in to aimplify/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /sign in with infovision sso/i }),
+    ).toHaveAttribute('href', '/api/v1/auth/login');
+    expect(screen.queryByRole('textbox', { name: /message/i })).not.toBeInTheDocument();
+    expect(authSession).not.toHaveBeenCalled();
+  });
+});
+
 describe('authenticated intake bootstrap', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
