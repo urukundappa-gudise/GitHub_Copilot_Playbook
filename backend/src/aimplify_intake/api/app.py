@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import secrets
 from collections.abc import Callable
@@ -441,6 +442,9 @@ def create_app(
                 "AUTHENTICATION_FAILED", "Sign-in could not be completed.", 401
             )
         if error or not code:
+            logging.getLogger(__name__).warning(
+                "OIDC callback rejected: provider_returned_error_or_missing_code"
+            )
             return RedirectResponse("/?auth=error", status_code=303)
         provider = app.state.oidc_provider
         if provider is None:
@@ -461,7 +465,28 @@ def create_app(
             OidcProviderError,
             httpx.HTTPError,
             ValueError,
-        ):
+        ) as failure:
+            reason = "identity_validation_failed"
+            if isinstance(failure, AuthlibBaseError):
+                reason = {
+                    "invalid_client": "client_credential_rejected",
+                    "invalid_grant": "authorization_code_rejected",
+                    "unauthorized_client": "client_flow_not_allowed",
+                    "invalid_request": "token_request_rejected",
+                }.get(getattr(failure, "error", None), "token_exchange_failed")
+            elif isinstance(failure, httpx.HTTPError):
+                reason = "provider_http_request_failed"
+            elif isinstance(failure, AuthConfigurationError):
+                reason = "authentication_configuration_invalid"
+            elif isinstance(failure, OidcProviderError):
+                reason = {
+                    "A required employee claim is missing.": "required_employee_claim_missing",
+                    "The ID token nonce is invalid.": "nonce_validation_failed",
+                    "The ID token issuer or audience is invalid.": "issuer_or_audience_invalid",
+                    "The ID token is expired or not yet valid.": "token_time_invalid",
+                    "The ID token could not be validated.": "token_signature_invalid",
+                }.get(str(failure), "identity_validation_failed")
+            logging.getLogger(__name__).warning("OIDC callback rejected: %s", reason)
             return RedirectResponse("/?auth=error", status_code=303)
         raw_token = secrets.token_urlsafe(32)
         now = datetime.now(UTC)

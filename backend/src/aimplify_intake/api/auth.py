@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -288,6 +289,9 @@ class EntraOidcProvider:
         for claim, target in (("oid", "oid"), ("upn", "upn"), ("name", "name")):
             value = claims.get(claim)
             if not isinstance(value, str) or not value.strip():
+                logging.getLogger(__name__).warning(
+                    "OIDC ID token missing required claim: %s", claim
+                )
                 raise OidcProviderError("A required employee claim is missing.")
             identity[target] = value
         email = claims.get("email")

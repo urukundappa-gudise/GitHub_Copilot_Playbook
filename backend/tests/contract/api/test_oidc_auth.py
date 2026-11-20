@@ -8,6 +8,7 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from authlib.integrations.base_client.errors import AuthlibBaseError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
@@ -239,7 +240,47 @@ def test_auth_logs_do_not_include_callback_values(caplog) -> None:
     assert all(value not in caplog.text for value in sentinels)
 
 
-def test_entra_provider_validates_signature_registered_claims_and_profile(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("provider_error", "expected_reason"),
+    [
+        ("invalid_client", "client_credential_rejected"),
+        ("invalid_grant", "authorization_code_rejected"),
+        ("unauthorized_client", "client_flow_not_allowed"),
+        ("sensitive-provider-error", "token_exchange_failed"),
+    ],
+)
+def test_callback_logs_only_allowlisted_token_exchange_reason(
+    monkeypatch, caplog, provider_error: str, expected_reason: str
+) -> None:
+    provider = ProviderFixture()
+    client, _ = _client(provider)
+    failure = AuthlibBaseError()
+    failure.error = provider_error
+    failure.description = "sensitive-provider-description"
+
+    async def reject_code(**_kwargs):
+        raise failure
+
+    monkeypatch.setattr(provider, "validate_authorization_code", reject_code)
+    with client, caplog.at_level(logging.WARNING, logger="aimplify_intake"):
+        state, _ = _begin_login(client)
+        response = client.get(
+            "/api/v1/auth/callback",
+            params={"code": "sensitive-code", "state": state},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert response.headers["location"] == "/?auth=error"
+        assert f"OIDC callback rejected: {expected_reason}" in caplog.text
+        assert "sensitive-provider-description" not in caplog.text
+        assert "sensitive-provider-error" not in caplog.text
+        assert "sensitive-code" not in caplog.text
+        assert state not in caplog.text
+        with client.app.state.session_factory() as session:
+            assert session.query(OidcApplicationSession).count() == 0
+
+
+def test_entra_provider_validates_signature_registered_claims_and_profile(monkeypatch, caplog) -> None:
     def rsa_key_pair():
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         private_pem = key.private_bytes(
@@ -375,6 +416,16 @@ def test_entra_provider_validates_signature_registered_claims_and_profile(monkey
         except OidcProviderError:
             continue
         pytest.fail(f"invalid ID token {index} was accepted")
+
+    assert "OIDC ID token missing required claim: upn" in caplog.text
+    for private_value in (
+        "employee-object-id",
+        "employee@infovision.example",
+        "InfoVision Employee",
+        "synthetic-code",
+        "synthetic-verifier",
+    ):
+        assert private_value not in caplog.text
 
 
 def test_logout_revokes_local_session_clears_cookie_and_redirects() -> None:
